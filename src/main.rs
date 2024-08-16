@@ -1,6 +1,6 @@
 #![allow(warnings)]
 mod matching_engine;
-use matching_engine::orderbook::{Order, BidOrAsk, Orderbook};
+use matching_engine::orderbook::{Order, BidOrAsk};
 use matching_engine::engine::{MatchingEngine, TradingPair};
 use rust_decimal_macros::dec;
 
