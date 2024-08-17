@@ -1,8 +1,8 @@
 #![allow(warnings)]
 mod matching_engine;
-use matching_engine::orderbook::{Order, BidOrAsk};
-use matching_engine::engine::{MatchingEngine, TradingPair};
-use rust_decimal_macros::dec;
+mod connecting_to_exchanges;
+use tokio_tungstenite::connect_async;
+use tokio;
 
 // TODO: two main things
 // 1) Prevent placing orders that will self trade (so cancel them immediately after when in the matching they would have matched with a self trade
@@ -12,31 +12,14 @@ use rust_decimal_macros::dec;
 //     Before fully implementing this think carefully how one would convert the events into orders for the orderbook.
 //     Then also implement a flag of 'shadow_order' which is a bool, which will trade as usual but does not remove liquidity from the orderbook
 //     This is done so that we can keep a proper local orderbook which is similar to the exchange.
-fn main() {
-    let trader_id = String::from("trader_id_audrique");
-    let mut engine = MatchingEngine::new();
 
 
-    let b1_order = Order::new(BidOrAsk::Bid, 5.5, trader_id.clone(), "0".to_string());
-    let b1_order_to_cancel = Order::new(BidOrAsk::Bid, 5.5, trader_id.clone(), "1".to_string());
-    let s1_order = Order::new(BidOrAsk::Ask, 9.5, trader_id.clone(), "2".to_string());
-    let pair = TradingPair::new("BTC".to_string(), "USDT".to_string());
-    engine.add_new_market(pair.clone());
 
-    let b2_order = Order::new(BidOrAsk::Bid, 6.5, trader_id.clone(), "3".to_string());
-    let s2_order = Order::new(BidOrAsk::Ask, 8.5, trader_id.clone(), "4".to_string());
-    let eth_pair = TradingPair::new("ETH".to_string(), "USDT".to_string());
-    engine.add_new_market(eth_pair.clone());
-
-
-    engine.place_limit_order(pair.clone(), dec!(30_000.0), b1_order).unwrap();
-    engine.place_limit_order(pair.clone(), dec!(30_000.0), b1_order_to_cancel).unwrap();
-    engine.place_limit_order(pair, dec!(31_000.0), s1_order).unwrap();
-    engine.place_limit_order(eth_pair.clone(), dec!(10_000.0), b2_order).unwrap();
-    engine.place_limit_order(eth_pair, dec!(11_000.0), s2_order).unwrap();
-
-    engine.
-    let open_orders = engine.open_orders(trader_id);
-    println!("{:?}", open_orders);
+#[tokio::main]
+async fn main() {
+    let url = "wss://test.deribit.com/ws/api/v2";
+    println!("Trying to connect to: {}", url);
+    let (ws_stream,_) = connect_async(url).await.expect("Failed to connect");
+    println!("Connetced to Deribit exchange");
 }
 

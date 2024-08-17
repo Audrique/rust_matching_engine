@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use super::orderbook::{Orderbook, Order};
+use super::orderbook::{Orderbook, Order, BidOrAsk};
 use rust_decimal::prelude::*;
 
 // BTCUSD => BTC is base and USD the quote
@@ -20,7 +20,7 @@ impl TradingPair {
 }
 
 pub struct MatchingEngine {
-    orderbooks: HashMap<TradingPair, Orderbook>,
+    pub orderbooks: HashMap<TradingPair, Orderbook>,
 }
 
 impl MatchingEngine {
@@ -66,7 +66,22 @@ impl MatchingEngine {
             })
             .collect()
     }
-    pub fn cancel_limit_order(trading_pair: TradingPair, order_id: String) {
-        todo!();
+    pub fn cancel_order(&mut self,
+                        pair: TradingPair,
+                        bid_or_ask: BidOrAsk,
+                        price:Decimal,
+                        order_id: String) -> Result<(), String> {
+        match self.orderbooks.get_mut(&pair) {
+            Some(orderbook) => {
+                orderbook.cancel_order(bid_or_ask, price, order_id);
+                Ok(())
+            },
+            None => {
+                Err(format!(
+                    "The orderbook for the given trading {} does not exist",
+                    pair.to_string()
+                ))
+            }
+        }
     }
 }
