@@ -18,20 +18,24 @@ fn main() {
 
 
     let b1_order = Order::new(BidOrAsk::Bid, 5.5, trader_id.clone(), "0".to_string());
-    let s1_order = Order::new(BidOrAsk::Ask, 9.5, trader_id.clone(), "1".to_string());
+    let b1_order_to_cancel = Order::new(BidOrAsk::Bid, 5.5, trader_id.clone(), "1".to_string());
+    let s1_order = Order::new(BidOrAsk::Ask, 9.5, trader_id.clone(), "2".to_string());
     let pair = TradingPair::new("BTC".to_string(), "USDT".to_string());
     engine.add_new_market(pair.clone());
 
-    let b2_order = Order::new(BidOrAsk::Bid, 6.5, trader_id.clone(), "2".to_string());
-    let s2_order = Order::new(BidOrAsk::Ask, 8.5, trader_id.clone(), "3".to_string());
+    let b2_order = Order::new(BidOrAsk::Bid, 6.5, trader_id.clone(), "3".to_string());
+    let s2_order = Order::new(BidOrAsk::Ask, 8.5, trader_id.clone(), "4".to_string());
     let eth_pair = TradingPair::new("ETH".to_string(), "USDT".to_string());
     engine.add_new_market(eth_pair.clone());
 
 
     engine.place_limit_order(pair.clone(), dec!(30_000.0), b1_order).unwrap();
+    engine.place_limit_order(pair.clone(), dec!(30_000.0), b1_order_to_cancel).unwrap();
     engine.place_limit_order(pair, dec!(31_000.0), s1_order).unwrap();
     engine.place_limit_order(eth_pair.clone(), dec!(10_000.0), b2_order).unwrap();
     engine.place_limit_order(eth_pair, dec!(11_000.0), s2_order).unwrap();
+
+    engine.
     let open_orders = engine.open_orders(trader_id);
     println!("{:?}", open_orders);
 }
