@@ -4,8 +4,9 @@ mod connecting_to_exchanges;
 use tokio_tungstenite::connect_async;
 use tokio;
 use tokio_tungstenite::tungstenite::Message;
-use serde_json::json;
+use serde_json::{json, Value};
 use futures_util::{StreamExt, SinkExt};
+use std::fs;
 // TODO: two main things
 // 1) Prevent placing orders that will self trade (so cancel them immediately after when in the matching they would have matched with a self trade
 //    and then disconnect the trader
@@ -21,24 +22,57 @@ use futures_util::{StreamExt, SinkExt};
 async fn main() {
     let url = "wss://www.deribit.com/ws/api/v2";
     println!("Trying to connect to: {}", url);
-    let (mut ws_stream,_) = connect_async(url).await.expect("Failed to connect");
+    let (mut ws_stream, _) = connect_async(url).await.expect("Failed to connect");
     println!("Connected to Deribit exchange");
 
-    // Create the message as JSON
+    // Get the client ID and client secret from the config file
+    let config_file = fs::read_to_string("config.json").expect("Unable to read config file");
+    let config: Value = serde_json::from_str(&config_file).expect("Unable to parse config file");
+
+    let client_id = config["client_id"].as_str().expect("Client ID not found");
+    let client_secret = config["client_secret"].as_str().expect("Client Secret not found");
+    println!("id: {}, secret: {}", client_id, client_secret);
+    // Authenticate with Deribit
+    let auth_msg = json!({
+        "jsonrpc": "2.0",
+        "id": 9929,
+        "method": "public/auth",
+        "params": {
+            "grant_type": "client_credentials",
+            "client_id": client_id,
+            "client_secret": client_secret
+        }
+    });
+
+    let auth_msg_text = auth_msg.to_string();
+    ws_stream.send(Message::Text(auth_msg_text)).await.expect("Failed to send auth message");
+
+    // Wait for authentication response
+    if let Some(Ok(auth_response)) = ws_stream.next().await {
+        if let Message::Text(auth_text) = auth_response {
+            println!("Received auth response: {}", auth_text);
+
+            // Parse the response to check for errors
+            let auth_response_json: serde_json::Value = serde_json::from_str(&auth_text).expect("Failed to parse auth response");
+            if auth_response_json.get("error").is_some() {
+                println!("Authentication failed: {:?}", auth_response_json["error"]);
+                return;
+            }
+        }
+    }
+
+    // Subscribe to the raw data channel after authentication
     let msg = json!({
         "method":"public/subscribe",
         "params":{
-        "channels":[
-        "book.BTC_USDT.none.1.agg2"
-        ]
+            "channels":[
+                "book.BTC_USDT.raw"
+            ]
         },
         "jsonrpc":"2.0",
-        "id":887
+        "id":9929
     });
-    // Serialize the message to a string
     let msg_text = msg.to_string();
-
-    // Send the message over the WebSocket connection
     ws_stream.send(Message::Text(msg_text)).await.expect("Failed to send message");
 
     // Handle incoming messages
@@ -47,7 +81,7 @@ async fn main() {
             Ok(msg) => match msg {
                 Message::Text(text) => {
                     println!("Received: {}", text);
-                    // You can add your logic here to handle the response
+                    // Add your logic here to handle the response
                 }
                 Message::Binary(bin) => {
                     println!("Received binary data: {:?}", bin);
