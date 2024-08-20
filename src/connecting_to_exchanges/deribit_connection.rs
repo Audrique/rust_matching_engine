@@ -5,7 +5,6 @@ use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tokio_tungstenite::tungstenite::Message;
 use futures_util::{StreamExt, SinkExt};
 
-
 //TODO: Remove the prints and replace it by Ok(), Err()
 pub async fn establish_connection(url: &str) -> WebSocketStream<MaybeTlsStream<TcpStream>>{
     println!("Trying to connect to: {}", url);

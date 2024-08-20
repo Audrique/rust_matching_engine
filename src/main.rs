@@ -7,13 +7,8 @@ use connecting_to_exchanges::deribit_connection::{establish_connection,
                                                   authenticate_deribit,
                                                   subscribe_to_channel,
                                                   on_incoming_message};
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tokio;
-use tokio_tungstenite::tungstenite::Message;
-use serde_json::{json, Value};
 use futures_util::{StreamExt, SinkExt};
-use std::fs;
-use tokio::net::TcpStream;
 // TODO: two main things
 // 1) Prevent placing orders that will self trade (so cancel them immediately after when in the matching they would have matched with a self trade
 //    and then disconnect the trader
