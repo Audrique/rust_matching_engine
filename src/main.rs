@@ -1,7 +1,7 @@
-#![allow(warnings)]
+// #![allow(warnings)]
 mod connecting_to_exchanges;
 mod matching_engine;
-
+use matching_engine::{engine::{MatchingEngine, TradingPair}, orderbook::{Orderbook, Order, BidOrAsk}};
 use connecting_to_exchanges::deribit_connection::{establish_connection,
                                                   read_config_file,
                                                   authenticate_deribit,
@@ -21,11 +21,15 @@ use futures_util::{StreamExt, SinkExt};
 
 #[tokio::main]
 async fn main() {
+    let trading_pair = TradingPair::new("BTC".to_string(), "USDT".to_string());
+    let mut engine = MatchingEngine::new();
+    engine.add_new_market(trading_pair.clone());
     let url = "wss://www.deribit.com/ws/api/v2";
     let mut ws_stream = establish_connection(url).await;
     let (client_id, client_secret) = read_config_file();
     authenticate_deribit(&mut ws_stream, &client_id, &client_secret).await;
-    let channels = vec!["book.BTC_USDT.raw"];
+    let channel_btc_usdt = &format!("book.{}.raw", trading_pair.to_string());
+    let channels = vec![channel_btc_usdt];
     subscribe_to_channel(&mut ws_stream, channels).await;
     on_incoming_message(&mut ws_stream).await;
 }

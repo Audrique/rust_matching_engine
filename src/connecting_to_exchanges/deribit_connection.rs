@@ -1,3 +1,4 @@
+
 use std::fs;
 use serde_json::{json, Value};
 use tokio::{net::TcpStream,
@@ -9,7 +10,7 @@ use futures_util::{StreamExt, SinkExt};
 //TODO: Remove the prints and replace it by Ok(), Err()
 pub async fn establish_connection(url: &str) -> WebSocketStream<MaybeTlsStream<TcpStream>>{
     println!("Trying to connect to: {}", url);
-    let (mut ws_stream, _) = connect_async(url).await.expect("Failed to connect");
+    let (ws_stream, _) = connect_async(url).await.expect("Failed to connect");
     println!("Connected to Deribit exchange");
     ws_stream
 }
@@ -53,7 +54,7 @@ pub async fn authenticate_deribit(ws_stream_ref: &mut WebSocketStream<MaybeTlsSt
     }
 }
 
-pub async fn subscribe_to_channel(ws_stream_ref: &mut WebSocketStream<MaybeTlsStream<TcpStream>>, channels: Vec<&str>) {
+pub async fn subscribe_to_channel(ws_stream_ref: &mut WebSocketStream<MaybeTlsStream<TcpStream>>, channels: Vec<&String>) {
     // Subscribe to the raw data channel after authentication
     let msg = json!({
         "method":"public/subscribe",
@@ -72,18 +73,54 @@ pub async fn on_incoming_message(ws_stream_ref: &mut WebSocketStream<MaybeTlsStr
         match ws_stream_ref.next().await {
             Some(Ok(msg)) => {
                 // Immediately offload the message processing to another function/task.
-                task::spawn(handle_message(msg));
+                task::spawn(process_message(msg));
             },
             Some(Err(e)) => {
                 eprintln!("Error receiving message: {:?}", e);
                 break;
             }
             None => break, // Exit the loop if the stream is closed.
-        };
+        }
     }
 }
 
+// fn parse_message(message: &str) -> Result<WebSocketMessage> {
+//     let parsed: WebSocketMessage = serde_json::from_str(message)?;
+//     Ok(parsed)
+// }
+
 //TODO: process the message here such that the receiving of the messages is the least amount blocked
-async fn handle_message(msg: Message) {
-    println!("{:?}", msg);
+async fn process_message(msg: Message, ) {
+    // Check this again
+    let update_msg = match msg {
+        Message::Text(text) => {text},
+        _ => {panic!()}
+    };
+    let parsed: serde_json::Value = serde_json::from_str(&update_msg).expect("Can't parse to JSON");
+    if let Some(params) = parsed.get("params") {
+        if let Some(data) = params.get("data") {
+            if let Some(Value::Array(asks_update)) = data.get("asks") {
+                if asks_update.len() != 0 {
+                    // here loop over the asks_updates
+                    // If "new": put it into the orderbook
+                    // -> Question: does new just add to the existing or is it the new total volume at that level
+                    // If "delete", cancel the order (the limit)
+                    // println!("{:?}", asks_update);
+                }
+            }
+            if let Some(Value::Array(bids_update)) = data.get("bids") {
+                if bids_update.len() != 0 {
+                    for price_level in bids_update {
+                        let type_of_update = &price_level[0];
+                        let price = &price_level[1];
+                        let volume = &price_level[2];
+                        // println!("Price: {}, Quantity: {}, type of update: {}", price, volume, type_of_update);
+                        if type_of_update == "delete" {
+                            println!("{:?}", volume);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
