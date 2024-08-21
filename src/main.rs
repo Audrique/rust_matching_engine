@@ -19,6 +19,9 @@ use futures_util::{StreamExt, SinkExt};
 //     This is done so that we can keep a proper local orderbook which is similar to the exchange.
 
 
+// TODO: if we try to cancel an order but it is not present anymore
+// for example: it has just been traded, then just dont do anything (or return a string or something)
+// But think of this case (will be important when connecting the websocket to the orderbook)
 #[tokio::main]
 async fn main() {
     let trading_pair = TradingPair::new("BTC".to_string(), "USDT".to_string());

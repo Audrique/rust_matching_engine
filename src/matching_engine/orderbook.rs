@@ -26,7 +26,7 @@ impl Orderbook {
 
         let limits = match market_order.bid_or_ask {
             BidOrAsk::Bid => {self.ask_limits()},
-            BidOrAsk::Ask => self.bid_limits()
+            BidOrAsk::Ask => {self.bid_limits()}
         };
 
         let mut prices_to_remove = Vec::new();
@@ -92,17 +92,19 @@ impl Orderbook {
         let mut prices_to_remove = Vec::new();
         match bid_or_ask {
             BidOrAsk::Bid => {
-                let limit_to_cancel_order = self.bids.get_mut(&price).unwrap();
-                limit_to_cancel_order.cancel_order(order_id);
-                if limit_to_cancel_order.orders.len() == 0 {
-                    prices_to_remove.push(limit_to_cancel_order.price);
+                if let Some(limit_to_cancel_order) = self.bids.get_mut(&price) {
+                    limit_to_cancel_order.cancel_order(order_id);
+                    if limit_to_cancel_order.orders.is_empty() {
+                        prices_to_remove.push(limit_to_cancel_order.price);
+                    }
                 }
             }
             BidOrAsk::Ask => {
-                let limit_to_cancel_order = self.asks.get_mut(&price).unwrap();
-                limit_to_cancel_order.cancel_order(order_id);
-                if limit_to_cancel_order.orders.len() == 0 {
-                    prices_to_remove.push(limit_to_cancel_order.price);
+                if let Some(limit_to_cancel_order) = self.asks.get_mut(&price) {
+                    limit_to_cancel_order.cancel_order(order_id);
+                    if limit_to_cancel_order.orders.is_empty() {
+                        prices_to_remove.push(limit_to_cancel_order.price);
+                    }
                 }
             }
         }
@@ -203,9 +205,9 @@ impl Limit {
     // However, the price is used to get the correct limit (so only in
     // the part of the orderbook for canceling.
     pub fn cancel_order(&mut self, order_id: String) {
-        let index = self.orders.iter().position(|a| a.order_id == order_id).unwrap();
-        self.orders.remove(index);
-
+        if let Some(index) = self.orders.iter().position(|a| a.order_id == order_id){
+            self.orders.remove(index);
+        }
     }
 }
 #[derive(Debug, Clone)]

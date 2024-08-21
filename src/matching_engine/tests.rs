@@ -53,6 +53,23 @@ pub mod tests {
         assert_eq!(test4, 1);
     }
     #[test]
+    fn cancel_order_that_is_not_there() {
+        let trader_id = String::from("trader_id_audrique");
+        let mut engine = MatchingEngine::new();
+        let pair = TradingPair::new("BTC".to_string(), "USDT".to_string());
+        engine.add_new_market(pair.clone());
+        let b1_order = Order::new(BidOrAsk::Bid, 5.5, trader_id.clone(), "0".to_string());
+        engine.place_limit_order(pair.clone(), dec!(30_000.0), b1_order).unwrap();
+
+        // Try canceling various orders that do not exist in the market
+        // Three options: the pair does not exist, the price does not exist at the Bid (or the Ask) or the order_id does not exist
+        // For the case of the wrong pair, we explicitly implemented an Err and thus the test would fail,
+        // however, for the other cases we want to just ignore it and keep going.
+        engine.cancel_order(pair.clone(), BidOrAsk::Bid, dec!(30_000.0), "1".to_string()).unwrap();
+        engine.cancel_order(pair.clone(), BidOrAsk::Bid, dec!(31_000.0), "0".to_string()).unwrap();
+        engine.cancel_order(pair.clone(), BidOrAsk::Ask, dec!(30_000.0), "0".to_string()).unwrap();
+    }
+    #[test]
     fn check_open_orders() {
         let mut orderbook = Orderbook::new();
 

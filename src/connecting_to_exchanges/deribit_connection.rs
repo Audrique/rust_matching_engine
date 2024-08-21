@@ -6,6 +6,8 @@ use tokio::{net::TcpStream,
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tokio_tungstenite::tungstenite::Message;
 use futures_util::{StreamExt, SinkExt};
+use crate::matching_engine::{engine::MatchingEngine, orderbook::{Order, BidOrAsk}};
+
 
 //TODO: Remove the prints and replace it by Ok(), Err()
 pub async fn establish_connection(url: &str) -> WebSocketStream<MaybeTlsStream<TcpStream>>{
@@ -84,13 +86,34 @@ pub async fn on_incoming_message(ws_stream_ref: &mut WebSocketStream<MaybeTlsStr
     }
 }
 
-// fn parse_message(message: &str) -> Result<WebSocketMessage> {
-//     let parsed: WebSocketMessage = serde_json::from_str(message)?;
-//     Ok(parsed)
-// }
+//TODO: move the parsing of the data from the function 'process_message' to this function
+fn parse_data(data: &Value) {
+    !todo!()
+}
+
+// fn get_
+
+// TODO: somehow manage to actually place the orders.
+// passing the MatchingEngine gives all sorts of problems (especially with the on_incoming_message and the 'spawn' part)
+fn place_orders(update: &Vec<Value>, bid_or_ask: BidOrAsk) {
+    for price_level in update {
+        if let Some(Value::String(type_of_update)) = &price_level.get(0) {
+            if let Some(Value::Number(price)) = &price_level.get(1) {
+                if let Some(Value::Number(volume)) = &price_level.get(2){
+                    match type_of_update.as_str() {
+                        "delete" => {println!("{:?}", "in the delete case")}, // in here cancel the order
+                        "new" => {println!("{:?}", "in the new case")}, // in here place the order
+                        _ => () // maybe put a panic here or something
+                    }
+                };
+            };
+        };
+
+    }
+}
 
 //TODO: process the message here such that the receiving of the messages is the least amount blocked
-async fn process_message(msg: Message, ) {
+async fn process_message(msg: Message) { //, matching_engine: MatchingEngine
     // Check this again
     let update_msg = match msg {
         Message::Text(text) => {text},
@@ -100,26 +123,14 @@ async fn process_message(msg: Message, ) {
     if let Some(params) = parsed.get("params") {
         if let Some(data) = params.get("data") {
             if let Some(Value::Array(asks_update)) = data.get("asks") {
-                if asks_update.len() != 0 {
-                    // here loop over the asks_updates
-                    // If "new": put it into the orderbook
-                    // -> Question: does new just add to the existing or is it the new total volume at that level
-                    // If "delete", cancel the order (the limit)
-                    // println!("{:?}", asks_update);
+                if !asks_update.is_empty() {
+                    place_orders(asks_update, BidOrAsk::Ask);
                 }
             }
             if let Some(Value::Array(bids_update)) = data.get("bids") {
-                if bids_update.len() != 0 {
-                    for price_level in bids_update {
-                        let type_of_update = &price_level[0];
-                        let price = &price_level[1];
-                        let volume = &price_level[2];
-                        // println!("Price: {}, Quantity: {}, type of update: {}", price, volume, type_of_update);
-                        if type_of_update == "delete" {
-                            println!("{:?}", volume);
-                        }
+                if !bids_update.is_empty() {
+                    place_orders(bids_update, BidOrAsk::Bid);
                     }
-                }
             }
         }
     }
