@@ -87,7 +87,6 @@ impl Orderbook {
         }
 
     }
-    // TODO: return some stuff if successful or not
     pub fn cancel_order(&mut self, bid_or_ask: BidOrAsk, price: Decimal, order_id: String) {
         let mut prices_to_remove = Vec::new();
         match bid_or_ask {
@@ -113,6 +112,33 @@ impl Orderbook {
             BidOrAsk::Ask => for price in prices_to_remove {self.asks.remove(&price);}
         }
     }
+
+    pub fn remove_volume_from_exchange_orders(&mut self, bid_or_ask: BidOrAsk, price: Decimal, volume: f64) {
+        let mut prices_to_remove = Vec::new();
+        match bid_or_ask {
+            BidOrAsk::Bid => {
+                if let Some(limit_to_cancel_order) = self.bids.get_mut(&price) {
+                    limit_to_cancel_order.remove_volume_from_exchange_orders(volume);
+                    if limit_to_cancel_order.orders.is_empty() {
+                        prices_to_remove.push(limit_to_cancel_order.price);
+                    }
+                }
+            }
+            BidOrAsk::Ask => {
+                if let Some(limit_to_cancel_order) = self.asks.get_mut(&price) {
+                    limit_to_cancel_order.remove_volume_from_exchange_orders(volume);
+                    if limit_to_cancel_order.orders.is_empty() {
+                        prices_to_remove.push(limit_to_cancel_order.price);
+                    }
+                }
+            }
+        }
+        match bid_or_ask {
+            BidOrAsk::Bid => for price in prices_to_remove {self.bids.remove(&price);}
+            BidOrAsk::Ask => for price in prices_to_remove {self.asks.remove(&price);}
+        }
+    }
+
     pub fn open_orders_for_trader(&self, trader_id: String) -> HashMap<Decimal, Vec<Order>> {
         self.asks
             .iter()
@@ -165,6 +191,8 @@ impl Limit {
 
     //TODO: At this moment self trades are avoided by just ignoring each trader's
     // other trades. This has to be change by not letting you place the order in the first place.
+    // The orders from the websocket are ALLOWED to self trade. Make sure this is implemented in a way.
+    // order_id = -1
     pub fn fill_order(&mut self, market_order: &mut Order) {
         let mut i = 0; // Index to keep track of the position in the orders vector
 
@@ -207,6 +235,35 @@ impl Limit {
     pub fn cancel_order(&mut self, order_id: String) {
         if let Some(index) = self.orders.iter().position(|a| a.order_id == order_id){
             self.orders.remove(index);
+        }
+    }
+
+    pub fn remove_volume_from_exchange_orders(&mut self, mut volume: f64) {
+    //     In here loop through all orders with order_id = '-1'
+    //     Then keep removing the volume and if the volume of an order is zero just remove it
+        // (and check if the limit needs to be removed) but this has to be done in the orderbook
+        let mut i = 0;
+        while (i < self.orders.len()) && (volume > 0.0) {
+            let limit_order = &mut self.orders[i];
+            if limit_order.order_id == "-1" {
+                match volume >= limit_order.size {
+                    true => {
+                        volume -= limit_order.size;
+                        limit_order.size = 0.0;
+                        self.orders.remove(i); // Remove the order at index `i`
+                        // No need to increment `i` since we just removed the current element
+                        continue;
+                    },
+                    false => {
+                        limit_order.size -= volume;
+                        volume = 0.0;
+                    }
+                }
+                i += 1;
+            } else {
+                i += 1;
+                continue;
+            }
         }
     }
 }

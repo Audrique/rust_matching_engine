@@ -95,13 +95,15 @@ fn parse_data(data: &Value) {
 
 // TODO: somehow manage to actually place the orders.
 // passing the MatchingEngine gives all sorts of problems (especially with the on_incoming_message and the 'spawn' part)
-fn place_orders(update: &Vec<Value>, bid_or_ask: BidOrAsk) {
+fn place_orders(update: &Vec<Value>, bid_or_ask: BidOrAsk) { //, mut matching_engine: &mut MatchingEngine) {
     for price_level in update {
         if let Some(Value::String(type_of_update)) = &price_level.get(0) {
             if let Some(Value::Number(price)) = &price_level.get(1) {
                 if let Some(Value::Number(volume)) = &price_level.get(2){
                     match type_of_update.as_str() {
-                        "delete" => {println!("{:?}", "in the delete case")}, // in here cancel the order
+                        "delete" => {println!("{:?}", "in the delete case"); // in here cancel the order
+                            // How to find the correct order_id to cancel?
+                        },
                         "new" => {println!("{:?}", "in the new case")}, // in here place the order
                         _ => () // maybe put a panic here or something
                     }
@@ -119,7 +121,8 @@ async fn process_message(msg: Message) { //, matching_engine: MatchingEngine
         Message::Text(text) => {text},
         _ => {panic!()}
     };
-    let parsed: serde_json::Value = serde_json::from_str(&update_msg).expect("Can't parse to JSON");
+    let parsed: Value = serde_json::from_str(&update_msg).expect("Can't parse to JSON");
+    println!("{:?}", parsed);
     if let Some(params) = parsed.get("params") {
         if let Some(data) = params.get("data") {
             if let Some(Value::Array(asks_update)) = data.get("asks") {

@@ -9,6 +9,7 @@ use connecting_to_exchanges::deribit_connection::{establish_connection,
                                                   on_incoming_message};
 use tokio;
 use futures_util::{StreamExt, SinkExt};
+use rust_decimal_macros::dec;
 // TODO: two main things
 // 1) Prevent placing orders that will self trade (so cancel them immediately after when in the matching they would have matched with a self trade
 //    and then disconnect the trader
@@ -19,17 +20,29 @@ use futures_util::{StreamExt, SinkExt};
 //     This is done so that we can keep a proper local orderbook which is similar to the exchange.
 
 
-// TODO: if we try to cancel an order but it is not present anymore
-// for example: it has just been traded, then just dont do anything (or return a string or something)
-// But think of this case (will be important when connecting the websocket to the orderbook)
+// Note: changes from the websocket are saved in the local orderbook with order_id = -1 (all of them)
+// All local strategy orders are saved with a unique iterator ('0', '1', ...) as order_id
+
+
+fn test_engine(mut matching_engine: &mut MatchingEngine, trading_pair: TradingPair) {
+    let trader_id = String::from("trader_id_audrique");
+    let b1_order = Order::new(BidOrAsk::Bid, 5.5, trader_id.clone(), "0".to_string());
+    matching_engine.place_limit_order(trading_pair, dec!(30_00.0), b1_order).unwrap();
+}
+
 #[tokio::main]
 async fn main() {
     let trading_pair = TradingPair::new("BTC".to_string(), "USDT".to_string());
     let mut engine = MatchingEngine::new();
     engine.add_new_market(trading_pair.clone());
+    // test_engine(&mut engine, trading_pair.clone());
+    // let t_id = String::from("trader_id_audrique");
+    // println!("{:?}",engine.open_orders(t_id));
+
     let url = "wss://www.deribit.com/ws/api/v2";
     let mut ws_stream = establish_connection(url).await;
     let (client_id, client_secret) = read_config_file();
+
     authenticate_deribit(&mut ws_stream, &client_id, &client_secret).await;
     let channel_btc_usdt = &format!("book.{}.raw", trading_pair.to_string());
     let channels = vec![channel_btc_usdt];
