@@ -1,13 +1,27 @@
-
 use std::fs;
 use serde_json::{json, Value};
-use tokio::{net::TcpStream,
-            task};
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
-use tokio_tungstenite::tungstenite::Message;
+use tokio::{net::TcpStream, task};
+use tokio_tungstenite::{tungstenite::Message,
+                        connect_async,
+                        MaybeTlsStream,
+                        WebSocketStream};
+use std::sync::{Arc, Mutex};
 use futures_util::{StreamExt, SinkExt};
-use crate::matching_engine::{engine::MatchingEngine, orderbook::{Order, BidOrAsk}};
+use rust_decimal::{Decimal, prelude::FromPrimitive};
+use crate::matching_engine::{engine::{MatchingEngine, TradingPair},
+                             orderbook::{Order, BidOrAsk}};
 
+// TODO: refacter some things in the processing functions
+
+// Helper function
+fn make_trading_pair_type(input_from_deribit: &String) -> TradingPair {
+    let parts: Vec<&str> = input_from_deribit.split('.').collect();
+    let together = parts.get(1).unwrap_or(&"").to_string();
+    let base_and_quote:  Vec<&str> = together.split('_').collect();
+    let trading_pair = TradingPair::new(base_and_quote.get(0).unwrap_or(&"").to_string(),
+                                        base_and_quote.get(1).unwrap_or(&"").to_string());
+    trading_pair
+}
 
 //TODO: Remove the prints and replace it by Ok(), Err()
 pub async fn establish_connection(url: &str) -> WebSocketStream<MaybeTlsStream<TcpStream>>{
@@ -56,7 +70,8 @@ pub async fn authenticate_deribit(ws_stream_ref: &mut WebSocketStream<MaybeTlsSt
     }
 }
 
-pub async fn subscribe_to_channel(ws_stream_ref: &mut WebSocketStream<MaybeTlsStream<TcpStream>>, channels: Vec<&String>) {
+pub async fn subscribe_to_channel(ws_stream_ref: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
+                                  channels: Vec<&String>) {
     // Subscribe to the raw data channel after authentication
     let msg = json!({
         "method":"public/subscribe",
@@ -70,12 +85,14 @@ pub async fn subscribe_to_channel(ws_stream_ref: &mut WebSocketStream<MaybeTlsSt
     ws_stream_ref.send(Message::Text(msg_text)).await.expect("Failed to send message");
 }
 
-pub async fn on_incoming_message(ws_stream_ref: &mut WebSocketStream<MaybeTlsStream<TcpStream>>) {
+pub async fn on_incoming_message(ws_stream_ref: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
+                                  matching_engine: Arc<Mutex<MatchingEngine>>) {
     loop {
         match ws_stream_ref.next().await {
             Some(Ok(msg)) => {
+                let matching_engine = Arc::clone(&matching_engine);
                 // Immediately offload the message processing to another function/task.
-                task::spawn(process_message(msg));
+                task::spawn(process_message(msg, matching_engine));
             },
             Some(Err(e)) => {
                 eprintln!("Error receiving message: {:?}", e);
@@ -86,25 +103,40 @@ pub async fn on_incoming_message(ws_stream_ref: &mut WebSocketStream<MaybeTlsStr
     }
 }
 
-//TODO: move the parsing of the data from the function 'process_message' to this function
-fn parse_data(data: &Value) {
-    !todo!()
-}
-
-// fn get_
-
 // TODO: somehow manage to actually place the orders.
-// passing the MatchingEngine gives all sorts of problems (especially with the on_incoming_message and the 'spawn' part)
-fn place_orders(update: &Vec<Value>, bid_or_ask: BidOrAsk) { //, mut matching_engine: &mut MatchingEngine) {
+fn place_orders(update: &Vec<Value>,
+                bid_or_ask: BidOrAsk,
+                trading_pair: TradingPair,
+                mut matching_engine: &mut MatchingEngine) { //, mut matching_engine: &mut MatchingEngine) {
     for price_level in update {
         if let Some(Value::String(type_of_update)) = &price_level.get(0) {
             if let Some(Value::Number(price)) = &price_level.get(1) {
+                let price = Decimal::from_f64(price.as_f64().unwrap()).unwrap();
                 if let Some(Value::Number(volume)) = &price_level.get(2){
+                    let volume = volume.as_f64().unwrap();
                     match type_of_update.as_str() {
-                        "delete" => {println!("{:?}", "in the delete case"); // in here cancel the order
-                            // How to find the correct order_id to cancel?
+                        "delete" => {// in here cancel the order
+                            // TODO: the volume here in the "delete" case
+                            // is zero if we need to delete put the new volume to zero
+                            // change the remove_volume_from_exchange a bit
+                            // to replace_volume_from_exhange
+                            matching_engine.remove_volume_from_exchange(
+                                trading_pair.clone(),
+                                bid_or_ask.clone(),
+                                price,
+                                volume
+                            ).unwrap();
                         },
-                        "new" => {println!("{:?}", "in the new case")}, // in here place the order
+                        "new" => {
+                            matching_engine.place_limit_order(
+                                trading_pair.clone(),
+                                price,
+                                Order::new(bid_or_ask.clone(),
+                                           volume,
+                                           "deribit".to_string(),
+                                           "-1".to_string())
+                            ).unwrap();
+                        },
                         _ => () // maybe put a panic here or something
                     }
                 };
@@ -115,25 +147,38 @@ fn place_orders(update: &Vec<Value>, bid_or_ask: BidOrAsk) { //, mut matching_en
 }
 
 //TODO: process the message here such that the receiving of the messages is the least amount blocked
-async fn process_message(msg: Message) { //, matching_engine: MatchingEngine
+async fn process_message(msg: Message, matching_engine: Arc<Mutex<MatchingEngine>>) {
     // Check this again
     let update_msg = match msg {
         Message::Text(text) => {text},
         _ => {panic!()}
     };
     let parsed: Value = serde_json::from_str(&update_msg).expect("Can't parse to JSON");
-    println!("{:?}", parsed);
+
     if let Some(params) = parsed.get("params") {
         if let Some(data) = params.get("data") {
-            if let Some(Value::Array(asks_update)) = data.get("asks") {
-                if !asks_update.is_empty() {
-                    place_orders(asks_update, BidOrAsk::Ask);
-                }
-            }
-            if let Some(Value::Array(bids_update)) = data.get("bids") {
-                if !bids_update.is_empty() {
-                    place_orders(bids_update, BidOrAsk::Bid);
+            if let Some(Value::String(trading_pair_string_ref)) = params.get("channel") {
+                let trading_pair = make_trading_pair_type(trading_pair_string_ref);
+                if let Some(Value::Array(asks_update)) = data.get("asks") {
+                    if !asks_update.is_empty() {
+                        let mut engine = matching_engine.lock().unwrap();
+                        place_orders(asks_update,
+                                     BidOrAsk::Ask,
+                                     trading_pair.clone(),
+                                     &mut engine);
+                        println!("The current state of the engine: {:?}", &engine);
                     }
+                }
+                if let Some(Value::Array(bids_update)) = data.get("bids") {
+                    if !bids_update.is_empty() {
+                        let mut engine = matching_engine.lock().unwrap();
+                        place_orders(bids_update,
+                                     BidOrAsk::Bid,
+                                     trading_pair,
+                                     &mut engine);
+                        println!("The current state of the engine: {:?}", &engine);
+                        }
+                }
             }
         }
     }

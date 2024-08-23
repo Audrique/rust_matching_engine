@@ -42,6 +42,8 @@ impl TradingPair {
     }
 }
 
+
+#[derive(Debug)]
 pub struct MatchingEngine {
     pub orderbooks: HashMap<TradingPair, Orderbook>,
 }
