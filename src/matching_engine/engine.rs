@@ -2,6 +2,29 @@ use std::collections::HashMap;
 use super::orderbook::{Orderbook, Order, BidOrAsk};
 use rust_decimal::prelude::*;
 
+
+// TODO: implement the StringCounter to make order_id's inside the engine and return them when orders are placed
+// (be careful with the "-1" od deribit orders)
+struct StringCounter {
+    count: usize,
+}
+
+impl StringCounter {
+    fn new() -> Self {
+        StringCounter { count: 0 }
+    }
+}
+
+impl Iterator for StringCounter {
+    type Item = String;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let result = self.count.to_string();
+        self.count += 1;
+        Some(result)
+    }
+}
+
 // BTCUSD => BTC is base and USD the quote
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 pub struct TradingPair {
