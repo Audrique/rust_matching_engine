@@ -54,7 +54,7 @@ pub mod tests {
     }
 
     #[test]
-    fn remove_websocket_volume_from_engine() {
+    fn leave_websocket_volume_from_engine() {
         let trader_id = String::from("trader_id_audrique");
         let mut engine = MatchingEngine::new();
 
@@ -75,7 +75,7 @@ pub mod tests {
         engine.place_limit_order(eth_pair.clone(), dec!(10_000.0), b2_order).unwrap();
         engine.place_limit_order(eth_pair, dec!(11_000.0), s2_order).unwrap();
 
-        engine.remove_volume_from_exchange(pair.clone(), BidOrAsk::Bid, dec!(30_000.0), 6.5).unwrap();
+        engine.leave_volume_from_exchange(pair.clone(), BidOrAsk::Bid, dec!(30_000.0), 0.0).unwrap();
 
         let test = &engine.orderbooks // get the orderbooks in the engine
             .get(&pair).unwrap() // get the orderbook of the pair that we are interested in
@@ -162,10 +162,11 @@ pub mod tests {
         orderbook.add_limit_order(dec!(100), Order::new(BidOrAsk::Ask, 10.0, "deribit".to_string(), "-1".to_string()));
         orderbook.add_limit_order(dec!(300), Order::new(BidOrAsk::Ask, 10.0, "deribit".to_string(), "-1".to_string()));
 
-        orderbook.remove_volume_from_exchange_orders(BidOrAsk::Ask, dec!(100), 20.0);
+        orderbook.leave_volume_from_exchange_orders(BidOrAsk::Ask, dec!(100), 20.0);
         let ask_limits = orderbook.ask_limits();
         let limit_at_100 =  ask_limits.get(0).unwrap();
-        assert_eq!(limit_at_100.orders.len(), 1);
+        assert_eq!(limit_at_100.orders.len(), 2);
+        assert_eq!(limit_at_100.total_volume(), 30.0);
 
     }
     #[test]
@@ -215,7 +216,7 @@ pub mod tests {
     }
 
     #[test]
-    fn remove_websocket_volume_from_limit() {
+    fn leave_websocket_volume_from_limit() {
         let price = dec!(10_000.0);
         let mut limit = Limit::new(price);
         let buy_limit_order_a = Order::new(BidOrAsk::Bid, 100.0, "trader1".to_string(), "0".to_string());
@@ -225,16 +226,16 @@ pub mod tests {
         limit.add_order(buy_limit_order_a);
         limit.add_order(buy_limit_order_b);
         limit.add_order(buy_limit_order_c);
-        limit.remove_volume_from_exchange_orders(250.0);
+        limit.leave_volume_from_exchange_orders(0.0);
         assert_eq!(limit.orders.len(), 1);
         let buy_limit_order_b = Order::new(BidOrAsk::Bid, 100.0, "deribit".to_string(), "-1".to_string());
         let buy_limit_order_c = Order::new(BidOrAsk::Bid, 100.0, "deribit".to_string(), "-1".to_string());
         limit.add_order(buy_limit_order_b);
         limit.add_order(buy_limit_order_c);
-        limit.remove_volume_from_exchange_orders(150.0);
-        assert_eq!(limit.orders.get(1).unwrap().size, 50.0);
-
+        limit.leave_volume_from_exchange_orders(150.0);
+        assert_eq!(limit.orders.get(1).unwrap().size, 150.0);
     }
+
     #[test]
     fn limit_order_multi_fill() {
         let price = dec!(10_000.0);

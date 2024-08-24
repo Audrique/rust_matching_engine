@@ -69,7 +69,7 @@ impl Orderbook {
                     None => {
                         let mut limit = Limit::new(price);
                         limit.add_order(order);
-                        self.bids.insert(price, limit); // here the price is copied since we also used it to make the limit
+                        self.bids.insert(price, limit);
                     },
                 }
 
@@ -81,7 +81,7 @@ impl Orderbook {
                 None => {
                     let mut limit = Limit::new(price);
                     limit.add_order(order);
-                    self.asks.insert(price, limit); // here the price is copied since we also used it to make the limit
+                    self.asks.insert(price, limit);
                 },
             }
         }
@@ -113,12 +113,15 @@ impl Orderbook {
         }
     }
 
-    pub fn remove_volume_from_exchange_orders(&mut self, bid_or_ask: BidOrAsk, price: Decimal, volume: f64) {
+    pub fn leave_volume_from_exchange_orders(&mut self,
+                                              bid_or_ask: BidOrAsk,
+                                              price: Decimal,
+                                              leave_volume: f64) {
         let mut prices_to_remove = Vec::new();
         match bid_or_ask {
             BidOrAsk::Bid => {
                 if let Some(limit_to_cancel_order) = self.bids.get_mut(&price) {
-                    limit_to_cancel_order.remove_volume_from_exchange_orders(volume);
+                    limit_to_cancel_order.leave_volume_from_exchange_orders(leave_volume);
                     if limit_to_cancel_order.orders.is_empty() {
                         prices_to_remove.push(limit_to_cancel_order.price);
                     }
@@ -126,7 +129,7 @@ impl Orderbook {
             }
             BidOrAsk::Ask => {
                 if let Some(limit_to_cancel_order) = self.asks.get_mut(&price) {
-                    limit_to_cancel_order.remove_volume_from_exchange_orders(volume);
+                    limit_to_cancel_order.leave_volume_from_exchange_orders(leave_volume);
                     if limit_to_cancel_order.orders.is_empty() {
                         prices_to_remove.push(limit_to_cancel_order.price);
                     }
@@ -194,19 +197,17 @@ impl Limit {
     // The orders from the websocket are ALLOWED to self trade. Make sure this is implemented in a way.
     // order_id = -1
     pub fn fill_order(&mut self, market_order: &mut Order) {
-        let mut i = 0; // Index to keep track of the position in the orders vector
+        let mut i = 0;
 
-        while i < self.orders.len() { // a while loop instead of a for loop because we don't always increment i (see the 'true' case in the match)
+        while i < self.orders.len() {
             let limit_order = &mut self.orders[i];
 
-            if market_order.trader_id != limit_order.trader_id { // Prevents self trades
+            if market_order.trader_id != limit_order.trader_id {
                 match market_order.size >= limit_order.size {
                     true => {
                         market_order.size -= limit_order.size;
                         limit_order.size = 0.0;
-                        self.orders.remove(i); // Remove the order at index `i`
-
-                        // No need to increment `i` since we just removed the current element
+                        self.orders.remove(i);
                         continue;
                     }
                     false => {
@@ -219,13 +220,17 @@ impl Limit {
             if market_order.is_filled() {
                 break;
             }
-
-            i += 1; // Increment index
+            i += 1;
         }
     }
 
     pub fn add_order(&mut self, order: Order) {
-        self.orders.push(order);
+        // Make sure only one 'exchange order' can exist per price level
+        if order.order_id == "-1" {
+            if let Some(existing_exchange_order) = self.orders.iter_mut().find(|o| o.order_id == "-1") {
+                existing_exchange_order.size = order.size;
+            } else {self.orders.push(order);}
+        } else {self.orders.push(order);}
     }
 
     //TODO: needs to return if the cancellation was a success or not
@@ -238,31 +243,15 @@ impl Limit {
         }
     }
 
-    pub fn remove_volume_from_exchange_orders(&mut self, mut volume: f64) {
-    //     In here loop through all orders with order_id = '-1'
-    //     Then keep removing the volume and if the volume of an order is zero just remove it
-        // (and check if the limit needs to be removed) but this has to be done in the orderbook
-        let mut i = 0;
-        while (i < self.orders.len()) && (volume > 0.0) {
-            let limit_order = &mut self.orders[i];
-            if limit_order.order_id == "-1" {
-                match volume >= limit_order.size {
-                    true => {
-                        volume -= limit_order.size;
-                        limit_order.size = 0.0;
-                        self.orders.remove(i); // Remove the order at index `i`
-                        // No need to increment `i` since we just removed the current element
-                        continue;
-                    },
-                    false => {
-                        limit_order.size -= volume;
-                        volume = 0.0;
-                    }
-                }
-                i += 1;
-            } else {
-                i += 1;
-                continue;
+    pub fn leave_volume_from_exchange_orders(&mut self, leave_volume: f64) {
+        // Just put the .size of the order_id="-1" to the correct leaves_volume
+        // but for this make sure we can only have one order per price level with order_id -1
+        // put this extra checker in the 'place_limit_order' function of the orderbook/limit
+        // self.orders.remove(i)
+        if let Some(idx) = self.orders.iter().position(|order| order.order_id == "-1") {
+            match leave_volume == 0.0 {
+                true => {self.orders.remove(idx);},
+                false => {self.orders[idx].size = leave_volume;}
             }
         }
     }

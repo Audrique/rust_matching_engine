@@ -75,9 +75,7 @@ pub async fn subscribe_to_channel(ws_stream_ref: &mut WebSocketStream<MaybeTlsSt
     // Subscribe to the raw data channel after authentication
     let msg = json!({
         "method":"public/subscribe",
-        "params":{
-            "channels": channels
-        },
+        "params":{"channels": channels},
         "jsonrpc":"2.0",
         "id":9922
     });
@@ -115,19 +113,15 @@ fn place_orders(update: &Vec<Value>,
                 if let Some(Value::Number(volume)) = &price_level.get(2){
                     let volume = volume.as_f64().unwrap();
                     match type_of_update.as_str() {
-                        "delete" => {// in here cancel the order
-                            // TODO: the volume here in the "delete" case
-                            // is zero if we need to delete put the new volume to zero
-                            // change the remove_volume_from_exchange a bit
-                            // to replace_volume_from_exhange
-                            matching_engine.remove_volume_from_exchange(
+                        "delete" => {
+                            matching_engine.leave_volume_from_exchange(
                                 trading_pair.clone(),
                                 bid_or_ask.clone(),
                                 price,
-                                volume
+                                volume // In this case the volume is always 0.0 -> maybe change it? or keep it as an extra 'check'
                             ).unwrap();
                         },
-                        "new" => {
+                        "new" => { // This case is correct
                             matching_engine.place_limit_order(
                                 trading_pair.clone(),
                                 price,
@@ -137,12 +131,19 @@ fn place_orders(update: &Vec<Value>,
                                            "-1".to_string())
                             ).unwrap();
                         },
+                        "change" => {// This case not correct yet
+                            matching_engine.leave_volume_from_exchange(
+                                trading_pair.clone(),
+                                bid_or_ask.clone(),
+                                price,
+                                volume
+                            ).unwrap();
+                        },
                         _ => () // maybe put a panic here or something
                     }
-                };
-            };
-        };
-
+                }
+            }
+        }
     }
 }
 
@@ -166,6 +167,7 @@ async fn process_message(msg: Message, matching_engine: Arc<Mutex<MatchingEngine
                                      BidOrAsk::Ask,
                                      trading_pair.clone(),
                                      &mut engine);
+                        println!("-------------------------------------------------------------------------");
                         println!("The current state of the engine: {:?}", &engine);
                     }
                 }
@@ -176,6 +178,7 @@ async fn process_message(msg: Message, matching_engine: Arc<Mutex<MatchingEngine
                                      BidOrAsk::Bid,
                                      trading_pair,
                                      &mut engine);
+                        println!("-------------------------------------------------------------------------");
                         println!("The current state of the engine: {:?}", &engine);
                         }
                 }

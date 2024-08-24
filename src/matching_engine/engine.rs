@@ -66,7 +66,7 @@ impl MatchingEngine {
         match self.orderbooks.get_mut(&pair) {
             Some(orderbook) => {
                 orderbook.add_limit_order(price, order);
-                println!("Placed limit order at price level {}", price);
+                // println!("Placed limit order at price level {}", price);
                 Ok(())
             },
             None => {
@@ -112,18 +112,18 @@ impl MatchingEngine {
 
     // This function is made since we do not have order_id's for the changes coming through the websocket
     // For example: 1) a "new" change at price 100 for 5 volume
-    //              2) then a "new" change at price 100 for 10
+    //              2) then a "change" change at price 100 for 10
     //              3) A local strategy places an order at the same level: 100 for volume 1
     //              4) many changes in between
     //              5) a "delete" for the price 100 (volume: 0.0)
     //              6) now all volume from the exchange should be deleted but not the order from the local strategy
-    pub fn remove_volume_from_exchange(&mut self,
+    pub fn leave_volume_from_exchange(&mut self,
                          pair: TradingPair,
                          bid_or_ask: BidOrAsk,
-                         price: Decimal, volume: f64) -> Result<(), String> {
+                         price: Decimal, leave_volume: f64) -> Result<(), String> {
         match self.orderbooks.get_mut(&pair) {
             Some(orderbook) => {
-                orderbook.remove_volume_from_exchange_orders(bid_or_ask, price, volume);
+                orderbook.leave_volume_from_exchange_orders(bid_or_ask, price, leave_volume);
                 Ok(())
             },
             None => {

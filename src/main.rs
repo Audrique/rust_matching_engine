@@ -44,6 +44,7 @@ async fn main() {
     // make the engine such that it can have
     // shared mutable references for the process_message function
     on_incoming_message(&mut ws_stream, Arc::new(Mutex::new(engine))).await;
+
 }
 
 
