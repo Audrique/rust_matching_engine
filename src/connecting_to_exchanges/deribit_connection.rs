@@ -105,7 +105,7 @@ pub async fn on_incoming_message(ws_stream_ref: &mut WebSocketStream<MaybeTlsStr
 fn place_orders(update: &Vec<Value>,
                 bid_or_ask: BidOrAsk,
                 trading_pair: TradingPair,
-                mut matching_engine: &mut MatchingEngine) { //, mut matching_engine: &mut MatchingEngine) {
+                matching_engine: &mut MatchingEngine) {
     for price_level in update {
         if let Some(Value::String(type_of_update)) = &price_level.get(0) {
             if let Some(Value::Number(price)) = &price_level.get(1) {
@@ -131,7 +131,7 @@ fn place_orders(update: &Vec<Value>,
                                            "-1".to_string())
                             ).unwrap();
                         },
-                        "change" => {// This case not correct yet
+                        "change" => {
                             matching_engine.leave_volume_from_exchange(
                                 trading_pair.clone(),
                                 bid_or_ask.clone(),
@@ -147,7 +147,6 @@ fn place_orders(update: &Vec<Value>,
     }
 }
 
-//TODO: process the message here such that the receiving of the messages is the least amount blocked
 async fn process_message(msg: Message, matching_engine: Arc<Mutex<MatchingEngine>>) {
     // Check this again
     let update_msg = match msg {
