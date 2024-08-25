@@ -43,7 +43,7 @@ impl TradingPair {
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MatchingEngine {
     pub orderbooks: HashMap<TradingPair, Orderbook>,
 }

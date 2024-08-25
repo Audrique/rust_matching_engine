@@ -1,6 +1,8 @@
 The project is under development.
 
-The orderbook in this project builds upon https://github.com/anthdm/rust-trading-engine, which to my knowledge is incomplete and will probably never be completed.
+The orderbook in this project builds upon https://github.com/anthdm/rust-trading-engine.
+
+The warp websocket in this project builds upon https://github.com/zupzup/warp-websockets-example.
 
 There should be a "config.json" file located in the root directory with a valid Deribit API client_id and client_secret:
 ```

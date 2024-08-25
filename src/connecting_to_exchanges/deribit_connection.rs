@@ -83,7 +83,7 @@ pub async fn subscribe_to_channel(ws_stream_ref: &mut WebSocketStream<MaybeTlsSt
     ws_stream_ref.send(Message::Text(msg_text)).await.expect("Failed to send message");
 }
 
-pub async fn on_incoming_message(ws_stream_ref: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
+pub async fn on_incoming_deribit_message(ws_stream_ref: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
                                   matching_engine: Arc<Mutex<MatchingEngine>>) {
     loop {
         match ws_stream_ref.next().await {
@@ -166,8 +166,8 @@ async fn process_message(msg: Message, matching_engine: Arc<Mutex<MatchingEngine
                                      BidOrAsk::Ask,
                                      trading_pair.clone(),
                                      &mut engine);
-                        println!("-------------------------------------------------------------------------");
-                        println!("The current state of the engine: {:?}", &engine);
+                        // println!("-------------------------------------------------------------------------");
+                        // println!("The current state of the engine: {:?}", &engine);
                     }
                 }
                 if let Some(Value::Array(bids_update)) = data.get("bids") {
@@ -177,8 +177,8 @@ async fn process_message(msg: Message, matching_engine: Arc<Mutex<MatchingEngine
                                      BidOrAsk::Bid,
                                      trading_pair,
                                      &mut engine);
-                        println!("-------------------------------------------------------------------------");
-                        println!("The current state of the engine: {:?}", &engine);
+                        // println!("-------------------------------------------------------------------------");
+                        // println!("The current state of the engine: {:?}", &engine);
                         }
                 }
             }

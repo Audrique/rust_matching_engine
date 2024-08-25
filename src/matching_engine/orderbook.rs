@@ -7,7 +7,7 @@ pub enum BidOrAsk {
     Ask,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Orderbook {
     pub asks: HashMap<Decimal, Limit>,
     pub bids: HashMap<Decimal, Limit>,
@@ -160,7 +160,7 @@ impl Orderbook {
 
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Limit {
     price: Decimal, // Not f64 because it can lead to inconsistencies when hashing
     pub orders: Vec<Order>,
