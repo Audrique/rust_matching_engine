@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use reqwest::{Client, RequestBuilder};
 use serde_json::json;
 use tokio_tungstenite::connect_async;
-use warp::ws::Message;
+// use warp::ws::Message;
+use tokio_tungstenite::tungstenite::Message;
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct RegisterRequest {
@@ -54,7 +55,8 @@ async fn main() {
         println!("WebSocket connected");
 
         // // Send a message to the WebSocket server
-        ws_stream.send(Message::Text("Hello from Rust!".into())).await.unwrap();
+        ws_stream.send(Message::text("ping")).await.unwrap();
+        println!("Message send to the server");
 
         // Receive messages from the WebSocket server
         while let Some(message) = ws_stream.next().await {

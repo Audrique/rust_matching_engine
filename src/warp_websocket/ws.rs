@@ -1,5 +1,7 @@
 use crate::{Client, Clients};
 use futures::{FutureExt, StreamExt};
+use futures_util::SinkExt;
+use futures_util::stream::SplitSink;
 use serde::Deserialize;
 use serde_json::from_str;
 use tokio::sync::mpsc;
@@ -38,6 +40,7 @@ pub async fn client_connection(ws: WebSocket, id: String, clients: Clients, mut 
         client_msg(&id, msg, &clients).await;
     }
 
+    // Only get here when we get an error and then remove the id
     clients.write().await.remove(&id);
     println!("{} disconnected", id);
 }
@@ -50,6 +53,14 @@ async fn client_msg(id: &str, msg: Message, clients: &Clients) {
     };
 
     if message == "ping" || message == "ping\n" {
+        println!("Received ping from {}", id);
+        let pong_message = Message::text("pong");
+        let mut locked_clients = clients.write().await;
+        if let Some(client) = locked_clients.get(id) {
+            if let Err(e) = client.sender.as_ref().unwrap().send(Ok(pong_message)) {
+                eprintln!("error sending pong message to {}: {}", id, e);
+            }
+        }
         return;
     }
 
@@ -66,3 +77,11 @@ async fn client_msg(id: &str, msg: Message, clients: &Clients) {
         v.topics = topics_req.topics;
     }
 }
+async fn send_message_to_client(client: &Client, msg: Message) {
+    if let Some(sender) = &client.sender {
+        if let Err(e) = sender.send(Ok(msg)) {
+            eprintln!("error sending message to client: {}", e);
+        }
+    }
+}
+

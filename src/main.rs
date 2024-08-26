@@ -9,7 +9,6 @@ use std::convert::Infallible;
 use warp_websocket::handler::TopicActionRequest;
 use tokio::sync::{mpsc, RwLock};
 use warp::{ws::Message, Filter, Rejection};
-use crate::warp_websocket::handler::{add_topic, remove_topic};
 use crate::warp_websocket::handler;
 
 
@@ -42,6 +41,10 @@ pub struct Client {
     pub user_id: usize,
     pub topics: Vec<String>,
     pub sender: Option<mpsc::UnboundedSender<std::result::Result<Message, warp::Error>>>,
+}
+
+fn with_clients(clients: Clients) -> impl Filter<Extract = (Clients,), Error = Infallible> + Clone {
+    warp::any().map(move || clients.clone())
 }
 
 #[tokio::main]
@@ -93,7 +96,8 @@ async fn main() {
             .and(warp::delete())
             .and(warp::path::param())
             .and(with_clients(clients.clone()))
-            .and_then(handler::unregister_handler));
+            .and_then(handler::unregister_handler)
+            );
 
     let publish = warp::path!("publish")
         .and(warp::body::json())
@@ -111,14 +115,14 @@ async fn main() {
         .and(warp::path("add_topic"))
         .and(warp::body::json::<TopicActionRequest>())
         .and(warp::any().map(move || clients_for_add.clone()))
-        .and_then(add_topic);
+        .and_then(handler::add_topic);
 
     let clients_for_remove = clients.clone();
     let remove_topic_route = warp::delete()
         .and(warp::path("remove_topic"))
         .and(warp::body::json::<TopicActionRequest>())
         .and(warp::any().map(move || clients_for_remove.clone()))
-        .and_then(remove_topic);
+        .and_then(handler::remove_topic);
 
     let routes = health_route
         .or(register_routes)
@@ -128,13 +132,7 @@ async fn main() {
         .or(remove_topic_route)
         .with(warp::cors().allow_any_origin());
 
-
-
     warp::serve(routes).run(([127, 0, 0, 1], 8000)).await;
-}
-
-fn with_clients(clients: Clients) -> impl Filter<Extract = (Clients,), Error = Infallible> + Clone {
-    warp::any().map(move || clients.clone())
 }
 
 
