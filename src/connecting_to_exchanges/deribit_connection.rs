@@ -11,7 +11,7 @@ use rust_decimal::{Decimal, prelude::FromPrimitive};
 use crate::matching_engine::{engine::{MatchingEngine, TradingPair},
                              orderbook::{Order, BidOrAsk}};
 
-// TODO: refacter some things in the processing functions
+// TODO: refactor some things in the processing functions
 
 // Helper function
 fn make_trading_pair_type(input_from_deribit: &String) -> TradingPair {

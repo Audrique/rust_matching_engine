@@ -23,7 +23,7 @@ use connecting_to_exchanges::deribit_connection::{authenticate_deribit,
                                                   subscribe_to_channel};
 use tokio;
 use futures_util::{SinkExt, StreamExt};
-
+use serde::{Deserialize, Serialize};
 // 1) Prevent placing orders that will self trade (so cancel them immediately after when in the matching they would have matched with a self trade
 //    and then disconnect the trader
 // 2) Return trades that happen (if 1 trader with an order trades with multiple traders

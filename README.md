@@ -1,4 +1,4 @@
-The project is under development.
+The project is a work in progress.
 
 The orderbook in this project builds upon https://github.com/anthdm/rust-trading-engine.
 
