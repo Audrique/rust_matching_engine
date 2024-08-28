@@ -42,8 +42,10 @@ async fn main() {
     let pair_string = "BTC_USDT".to_string();
     let exchange = "deribit".to_string();
     // Subscribe to the BTC_USDT pair on best_bid_change
-    let topic = format!("{}_{}_best_ask_change", pair_string, exchange);
-    let register_request = json!({ "user_id": 1, "topic": topic });
+    let topic_ask = format!("{}_{}_best_bid_change", pair_string, exchange);
+    // let topic_2 = format!("{}_{}_best_bid_change", pair_string, exchange);
+    let register_request = json!({ "user_id": 1, "topic": topic_ask});
+    // add the bid topic with the add_topic handler
 
     let response = http_client.post(register_url)
         .json(&register_request)  // Send as JSON

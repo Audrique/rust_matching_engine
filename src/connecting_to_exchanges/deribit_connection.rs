@@ -164,6 +164,8 @@ fn place_orders(update: &Vec<Value>,
 
 // In here also call the publish_handler from handler.ws (for now only the {pair}_{deribit}_best_bid_change
 // and {pair}_{deribit}_best_ask_change)
+// TODO: refactor and abstract this function (and probably other functions in this file)
+// TODO: also make sure the previous_best_bids and asks are correct since I think they are not implemented correctly (they dont overwrite the previous one correctly or something)
 async fn process_message(msg: Message,
                          matching_engine: Arc<TokioMutex<MatchingEngine>>,
                          mut previous_best_bids: Arc<TokioMutex<HashMap<TradingPair, Decimal>>>,
@@ -192,9 +194,6 @@ async fn process_message(msg: Message,
                         let (best_ask_price, _) = orderbook.asks.first_key_value().ok_or("No asks found")?;
                         let best_ask_price = best_ask_price.clone();
 
-                        // println!("-------------------------------------------------------------------------");
-                        // println!("The current state of the engine: {:?}", &engine);
-
                         // Release the lock on the engine
                         drop(engine);
 
@@ -214,7 +213,9 @@ async fn process_message(msg: Message,
                                 let message = format!("Best ask: {}", best_ask_price);
                                 let event = Event::new(topic.clone(), None, message);
                                 // Call the publish_handler to broadcast the message
-                                if let Err(e) = publish_handler(event, clients).await {
+                                // We have to clone the clients since we also want to call it in the bids case
+                                let clients_clone = Arc::clone(&clients);
+                                if let Err(e) = publish_handler(event, clients_clone).await {
                                     eprintln!("Failed to publish message for topic {}: {:?}", topic, e);
                                 }
                             }
@@ -227,26 +228,61 @@ async fn process_message(msg: Message,
                             let message = format!("Best ask: {}", best_ask_price);
                             let event = Event::new(topic.clone(), None, message);
                             // Call the publish_handler to broadcast the message
-                            if let Err(e) = publish_handler(event, clients).await {
+                            let clients_clone = Arc::clone(&clients);
+                            if let Err(e) = publish_handler(event, clients_clone).await {
                                 eprintln!("Failed to publish message for topic {}: {:?}", topic, e);
                             }
                         }
-
-                        // let (best_bid_price, best_bid_limit) = orderbook.bids.last_key_value().unwrap();
-                        // TODO: see below (and also do the above in the "delete" and "change" cases
-
                     }
                 }
                 // Process the bids
                 if let Some(Value::Array(bids_update)) = data.get("bids") {
                     if !bids_update.is_empty() {
                         let mut engine = matching_engine.lock().await;
-                        place_orders(bids_update, BidOrAsk::Bid, trading_pair, &mut engine);
+                        place_orders(bids_update, BidOrAsk::Bid, trading_pair.clone(), &mut engine);
 
+                        // Now check if the best ask price has changed
+                        let orderbook = engine.orderbooks.get(&trading_pair).ok_or("Orderbook not found")?;
+                        let (best_bid_price, _) = orderbook.bids.last_key_value().ok_or("No asks found")?;
+                        let best_bid_price = best_bid_price.clone();
+
+                        // Release the lock on the engine
                         drop(engine);
-                        // println!("-------------------------------------------------------------------------");
-                        // println!("The current state of the engine: {:?}", &engine);
+
+                        let mut previous_best_b = previous_best_bids.lock().await;
+
+                        if let Some(previous_bb) = previous_best_b.get(&trading_pair) {
+
+                            if (best_bid_price - previous_bb).abs() > Decimal::new(1, 4) {
+                                // Update the previous best ask
+                                // TODO: make sure we overwrite the previous_best_b
+                                previous_best_b.insert(trading_pair.clone(), best_bid_price);
+                                drop(previous_best_b);
+                                // Send an update to the subscribed clients
+                                let topic = format!("{}_deribit_best_bid_change", trading_pair.clone().to_string());
+                                println!("{}", &topic);
+                                let message = format!("Best bid: {}", best_bid_price);
+                                let event = Event::new(topic.clone(), None, message);
+                                // Call the publish_handler to broadcast the message
+                                let clients_clone = Arc::clone(&clients);
+                                if let Err(e) = publish_handler(event, clients_clone).await {
+                                    eprintln!("Failed to publish message for topic {}: {:?}", topic, e);
+                                }
+                            }
+                        } else {
+                            // Update the previous best ask
+                            previous_best_b.insert(trading_pair.clone(), best_bid_price);
+                            drop(previous_best_b);
+                            // Send an update to the subscribed clients
+                            let topic = format!("{}_deribit_best_bid_change", trading_pair.clone().to_string());
+                            let message = format!("Best bid: {}", best_bid_price);
+                            let event = Event::new(topic.clone(), None, message);
+                            // Call the publish_handler to broadcast the message
+                            if let Err(e) = publish_handler(event, clients).await {
+                                eprintln!("Failed to publish message for topic {}: {:?}", topic, e);
+                            }
                         }
+                    }
                 }
             }
         }
