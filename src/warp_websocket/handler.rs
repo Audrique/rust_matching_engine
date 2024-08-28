@@ -28,6 +28,16 @@ pub struct Event {
     message: String,
 }
 
+impl Event {
+    pub fn new(topic: String, user_id: Option<usize>, message: String) -> Event {
+        Event {
+            topic,
+            user_id,
+            message
+        }
+    }
+}
+
 pub async fn publish_handler(body: Event, clients: Clients) -> Result<impl Reply> {
     clients
         .read()

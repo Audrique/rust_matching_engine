@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
+
+use std::fmt::format;
 use futures_util::{StreamExt, SinkExt};
 use serde::{Deserialize, Serialize};
 use reqwest::{Client, RequestBuilder};
@@ -37,7 +39,11 @@ async fn main() {
     let http_client = Client::new();
     let register_url = "http://localhost:8000/register";
 
-    let register_request = json!({ "user_id": 1, "topic": "best_bid_and_ask".to_string() });
+    let pair_string = "BTC_USDT".to_string();
+    let exchange = "deribit".to_string();
+    // Subscribe to the BTC_USDT pair on best_bid_change
+    let topic = format!("{}_{}_best_ask_change", pair_string, exchange);
+    let register_request = json!({ "user_id": 1, "topic": topic });
 
     let response = http_client.post(register_url)
         .json(&register_request)  // Send as JSON
