@@ -188,9 +188,8 @@ async fn process_message(msg: Message,
                         place_orders(asks_update, BidOrAsk::Ask, trading_pair.clone(), &mut engine);
 
                         // Now check if the best ask price has changed
-                        // TODO: Maybe remove the ok_or since it could stop the program?
                         let orderbook = engine.orderbooks.get(&trading_pair).ok_or("Orderbook not found")?;
-                        let (best_ask_price, _) = orderbook.asks.first_key_value().unwrap();
+                        let (best_ask_price, _) = orderbook.asks.first_key_value().ok_or("No asks found")?;
                         let best_ask_price = best_ask_price.clone();
 
                         // println!("-------------------------------------------------------------------------");
