@@ -198,14 +198,16 @@ async fn process_message(msg: Message,
                         drop(engine);
 
                         let mut previous_best_a = previous_best_asks.lock().await;
-
+                        //refactor this a lot
                         if let Some(previous_ba) = previous_best_a.get(&trading_pair) {
                             // If the difference is more than 0.0001 we consider it a new best ask
                             // we can't directly use the != operator
                             if (best_ask_price - previous_ba).abs() > Decimal::new(1, 4) {
                                 // Update the previous best ask
                                 // TODO: make sure we overwrite the previous_best_a
-                                previous_best_a.insert(trading_pair.clone(), best_ask_price);
+                                previous_best_a.entry(trading_pair.clone())
+                                    .and_modify(|e| *e = best_ask_price)
+                                    .or_insert(best_ask_price);
                                 drop(previous_best_a);
                                 // Send an update to the subscribed clients
                                 let topic = format!("{}_deribit_best_ask_change", trading_pair.clone().to_string());
@@ -255,8 +257,9 @@ async fn process_message(msg: Message,
 
                             if (best_bid_price - previous_bb).abs() > Decimal::new(1, 4) {
                                 // Update the previous best ask
-                                // TODO: make sure we overwrite the previous_best_b
-                                previous_best_b.insert(trading_pair.clone(), best_bid_price);
+                                previous_best_b.entry(trading_pair.clone())
+                                    .and_modify(|e| *e = best_bid_price)
+                                    .or_insert(best_bid_price);
                                 drop(previous_best_b);
                                 // Send an update to the subscribed clients
                                 let topic = format!("{}_deribit_best_bid_change", trading_pair.clone().to_string());
