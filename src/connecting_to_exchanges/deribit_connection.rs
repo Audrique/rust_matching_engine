@@ -16,6 +16,9 @@ use crate::matching_engine::{engine::{MatchingEngine, TradingPair},
 use crate::warp_websocket::handler::{Event, publish_handler};
 
 // TODO: create more helper functions and refactor the code
+// TODO: I use the websocket wrong. To publish you dont need to call the specific handler but you should post something
+//  On the 'http://localhost:8000/publish' and it will automatically get published.
+//  The deribit exchange does not even have to be a 'client'. (This way is way better and cleaner)
 
 // Helper function
 fn make_trading_pair_type(input_from_deribit: &String) -> TradingPair {
