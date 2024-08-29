@@ -7,7 +7,7 @@ mod matching_engine;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use warp_websocket::handler::TopicActionRequest;
-use tokio::sync::{mpsc, RwLock, Mutex as TokioMutex};
+use tokio::sync::{mpsc, oneshot, RwLock, Mutex as TokioMutex};
 use warp::{ws::Message, Filter, Rejection};
 use crate::warp_websocket::handler;
 use std::sync::Arc;
@@ -34,6 +34,13 @@ fn with_clients(clients: Clients) -> impl Filter<Extract = (Clients,), Error = I
     warp::any().map(move || clients.clone())
 }
 
+async fn wait_for_server(rx: oneshot::Receiver<()>) {
+    match rx.await {
+        Ok(_) => println!("Server is ready, starting to process Deribit messages"),
+        Err(_) => eprintln!("Failed to receive server ready signal"),
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let trading_pair = TradingPair::new("BTC".to_string(), "USDT".to_string());
@@ -42,6 +49,9 @@ async fn main() {
 
     let engine = Arc::new(TokioMutex::new(engine));
     let clients: Clients = Arc::new(RwLock::new(HashMap::new()));
+
+    // Create an oneshot-channel for signaling server readiness
+    let (tx, rx) = oneshot::channel();
 
     // Spawn the Deribit connection handling
     let deribit_clients = clients.clone();
@@ -55,7 +65,8 @@ async fn main() {
         let channel_btc_usdt = &format!("book.{}.raw", trading_pair.to_string());
         let channels = vec![channel_btc_usdt];
         subscribe_to_channel(&mut ws_stream, channels).await;
-
+        // Wait for the server to be ready before processing messages
+        wait_for_server(rx).await;
         on_incoming_deribit_message(&mut ws_stream, deribit_engine, deribit_clients).await;
     });
 
@@ -109,6 +120,9 @@ async fn main() {
         .or(add_topic_route)
         .or(remove_topic_route)
         .with(warp::cors().allow_any_origin());
+
+    // Signal that the server is about to start
+    let _ = tx.send(());
 
     warp::serve(routes).run(([127, 0, 0, 1], 8000)).await;
 }
