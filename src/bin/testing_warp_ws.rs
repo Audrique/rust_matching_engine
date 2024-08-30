@@ -37,7 +37,7 @@ pub struct Event {
 #[tokio::main]
 async fn main() {
     let http_client = Client::new();
-    let register_url = "http://localhost:8000/register";
+    let register_url = "http://127.0.0.1:8000/register";
 
     let pair_string = "BTC_USDT".to_string();
     let exchange = "deribit".to_string();
@@ -55,7 +55,7 @@ async fn main() {
         let register_response: RegisterResponse = response.json().await.expect("Failed to parse response");
         println!("Successfully registered client! WebSocket URL: {}", register_response.url);
         // add the topic of the best ask
-        let add_topic_url = "http://localhost:8000/add_topic";
+        let add_topic_url = "http://127.0.0.1:8000/add_topic";
         let topic_ask = format!("{}_{}_best_ask_change", pair_string.clone(), exchange.clone());
         let client_id = register_response.url.split('/').last().unwrap_or("");
         let add_topic_request = json!({"topic": topic_ask, "client_id": client_id});

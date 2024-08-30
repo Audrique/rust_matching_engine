@@ -19,6 +19,9 @@ use crate::warp_websocket::handler::{Event, publish_handler};
 // TODO: I use the websocket wrong. To publish you dont need to call the specific handler but you should post something
 //  On the 'http://localhost:8000/publish' and it will automatically get published.
 //  The deribit exchange does not even have to be a 'client'. (This way is way better and cleaner)
+//  Also, in this way 'clients' does not need to be passed to the deribit part of the code which is awesome
+//  Finally, we can pass an Arc<mutex<MatchingEngine>>> to the ws_handler inside the route definition since
+//  ws_handler connects to the functions in ws.rs which receive messages from the clients (actions to be taken on the matching engine)
 
 // Helper function
 fn make_trading_pair_type(input_from_deribit: &String) -> TradingPair {
