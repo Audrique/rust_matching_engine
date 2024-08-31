@@ -54,7 +54,6 @@ async fn main() {
     let (tx, rx) = oneshot::channel();
 
     // Spawn the Deribit connection handling
-    let deribit_clients = clients.clone();
     let deribit_engine = engine.clone();
     tokio::spawn(async move {
         let url_deribit = "wss://www.deribit.com/ws/api/v2";
@@ -67,7 +66,7 @@ async fn main() {
         subscribe_to_channel(&mut ws_stream, channels).await;
         // Wait for the server to be ready before processing messages
         wait_for_server(rx).await;
-        on_incoming_deribit_message(&mut ws_stream, deribit_engine, deribit_clients).await;
+        on_incoming_deribit_message(&mut ws_stream, deribit_engine).await;
     });
 
     // ----------------------------------------------------------------------------------

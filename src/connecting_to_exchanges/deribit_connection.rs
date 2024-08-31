@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
+use std::error::Error;
 use serde_json::{json, Value};
 use tokio::{net::TcpStream, task};
 use tokio_tungstenite::{tungstenite::Message,
@@ -10,7 +11,9 @@ use std::sync::Arc;
 use futures_util::{StreamExt, SinkExt};
 use rust_decimal::{Decimal, prelude::FromPrimitive};
 use tokio::sync::{RwLock, Mutex as TokioMutex};
-use crate::{Client, Clients};
+use crate::{Clients};
+use reqwest::Client;
+use tokio_tungstenite::tungstenite::client;
 use crate::matching_engine::{engine::{MatchingEngine, TradingPair},
                              orderbook::{Order, BidOrAsk}};
 use crate::warp_websocket::handler::{Event, publish_handler};
@@ -94,21 +97,22 @@ pub async fn subscribe_to_channel(ws_stream_ref: &mut WebSocketStream<MaybeTlsSt
 }
 
 pub async fn on_incoming_deribit_message(ws_stream_ref: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
-                                  matching_engine: Arc<TokioMutex<MatchingEngine>>,
-                                         clients: Clients) {
+                                  matching_engine: Arc<TokioMutex<MatchingEngine>>) {
     // Keeps track of the previous best bids/asks such that we can send updates to the subscribed clients
     let previous_best_bids: Arc<TokioMutex<HashMap<TradingPair, Decimal>>> = Arc::new(TokioMutex::new(HashMap::new()));
     let previous_best_asks: Arc<TokioMutex<HashMap<TradingPair, Decimal>>> = Arc::new(TokioMutex::new(HashMap::new()));
+    // let publish_client: Arc<TokioMutex<&Client>> = Arc::new(TokioMutex::new(&Client::new()));
+    let publish_client = Arc::new(Client::new());
     loop {
         match ws_stream_ref.next().await {
             Some(Ok(msg)) => {
                 let previous_best_bids = Arc::clone(&previous_best_bids);
                 let previous_best_asks = Arc::clone(&previous_best_asks);
                 let matching_engine = Arc::clone(&matching_engine);
-                let clients = Arc::clone(&clients);
+                let publish_client = Arc::clone(&publish_client);
                 // Immediately offload the message processing to another function/task.
                 tokio::spawn(async move {
-                    if let Err(e) = process_message(msg, matching_engine, previous_best_bids, previous_best_asks, clients).await {
+                    if let Err(e) = process_message(msg, matching_engine, previous_best_bids, previous_best_asks, publish_client).await {
                         eprintln!("Error processing message: {:?}", e);
                     }
                 });
@@ -168,27 +172,41 @@ fn place_orders(update: &Vec<Value>,
 }
 
 
+async fn publish_message(msg: String, topic: String, client: &Client) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let payload = json!({
+        "user_id": 1,
+        "topic": topic,
+        "message": msg
+    });
+    let url = "http://127.0.0.1:8000/publish";
+    let response = client.post(url).json(&payload).send().await?;
+    // Check the response status
+    if !response.status().is_success() {
+        return Err(format!("Failed to publish message: {}", response.status()).into());
+    }
+    Ok(())
+}
+
 // In here also call the publish_handler from handler.ws (for now only the {pair}_{deribit}_best_bid_change
 // and {pair}_{deribit}_best_ask_change)
 // TODO: refactor and abstract this function (and probably other functions in this file)
 // TODO: also make sure the previous_best_bids and asks are correct since I think they are not implemented correctly (they dont overwrite the previous one correctly or something)
+
 async fn process_message(msg: Message,
                          matching_engine: Arc<TokioMutex<MatchingEngine>>,
                          mut previous_best_bids: Arc<TokioMutex<HashMap<TradingPair, Decimal>>>,
                          mut previous_best_asks: Arc<TokioMutex<HashMap<TradingPair, Decimal>>>,
-                         clients: Clients
+                         publish_client: Arc<Client>
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let update_msg = match msg {
         Message::Text(text) => {text},
         _ => {panic!()}
     };
     let parsed: Value = serde_json::from_str(&update_msg).expect("Can't parse to JSON");
-
     if let Some(params) = parsed.get("params") {
         if let Some(data) = params.get("data") {
             if let Some(Value::String(trading_pair_string_ref)) = params.get("channel") {
                 let trading_pair = make_trading_pair_type(trading_pair_string_ref);
-
                 // Process asks
                 if let Some(Value::Array(asks_update)) = data.get("asks") {
                     if !asks_update.is_empty() {
@@ -210,22 +228,16 @@ async fn process_message(msg: Message,
                             // we can't directly use the != operator
                             if (best_ask_price - previous_ba).abs() > Decimal::new(1, 4) {
                                 // Update the previous best ask
-                                // TODO: make sure we overwrite the previous_best_a
                                 previous_best_a.entry(trading_pair.clone())
                                     .and_modify(|e| *e = best_ask_price)
                                     .or_insert(best_ask_price);
                                 drop(previous_best_a);
                                 // Send an update to the subscribed clients
                                 let topic = format!("{}_deribit_best_ask_change", trading_pair.clone().to_string());
-                                println!("{}", &topic);
                                 let message = format!("Best ask: {}", best_ask_price);
-                                let event = Event::new(topic.clone(), None, message);
-                                // Call the publish_handler to broadcast the message
-                                // We have to clone the clients since we also want to call it in the bids case
-                                let clients_clone = Arc::clone(&clients);
-                                if let Err(e) = publish_handler(event, clients_clone).await {
-                                    eprintln!("Failed to publish message for topic {}: {:?}", topic, e);
-                                }
+                                // let event = Event::new(topic.clone(), None, message);
+                                publish_message(message.clone(), topic, &publish_client).await?;
+                                println!("published {}", message);
                             }
                         } else {
                             // Update the previous best ask
@@ -234,12 +246,8 @@ async fn process_message(msg: Message,
                             // Send an update to the subscribed clients
                             let topic = format!("{}_deribit_best_ask_change", trading_pair.clone().to_string());
                             let message = format!("Best ask: {}", best_ask_price);
-                            let event = Event::new(topic.clone(), None, message);
-                            // Call the publish_handler to broadcast the message
-                            let clients_clone = Arc::clone(&clients);
-                            if let Err(e) = publish_handler(event, clients_clone).await {
-                                eprintln!("Failed to publish message for topic {}: {:?}", topic, e);
-                            }
+                            publish_message(message.clone(), topic, &publish_client).await?;
+                            println!("published {}", message);
                         }
                     }
                 }
@@ -269,14 +277,9 @@ async fn process_message(msg: Message,
                                 drop(previous_best_b);
                                 // Send an update to the subscribed clients
                                 let topic = format!("{}_deribit_best_bid_change", trading_pair.clone().to_string());
-                                println!("{}", &topic);
                                 let message = format!("Best bid: {}", best_bid_price);
-                                let event = Event::new(topic.clone(), None, message);
-                                // Call the publish_handler to broadcast the message
-                                let clients_clone = Arc::clone(&clients);
-                                if let Err(e) = publish_handler(event, clients_clone).await {
-                                    eprintln!("Failed to publish message for topic {}: {:?}", topic, e);
-                                }
+                                publish_message(message.clone(), topic, &publish_client).await?;
+                                println!("published {}", message);
                             }
                         } else {
                             // Update the previous best ask
@@ -285,11 +288,8 @@ async fn process_message(msg: Message,
                             // Send an update to the subscribed clients
                             let topic = format!("{}_deribit_best_bid_change", trading_pair.clone().to_string());
                             let message = format!("Best bid: {}", best_bid_price);
-                            let event = Event::new(topic.clone(), None, message);
-                            // Call the publish_handler to broadcast the message
-                            if let Err(e) = publish_handler(event, clients).await {
-                                eprintln!("Failed to publish message for topic {}: {:?}", topic, e);
-                            }
+                            publish_message(message.clone(), topic, &publish_client).await?;
+                            println!("published {}", message);
                         }
                     }
                 }
