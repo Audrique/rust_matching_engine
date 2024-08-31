@@ -164,8 +164,9 @@ fn place_orders(update: &Vec<Value>,
     }
 }
 
-
-async fn publish_message(msg: String, topic: String, client: &Client) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+// TODO: Add a client with user_id = 98326 and match this with the below user_id, which we thus use for publishing (now it is matched
+//  with the test_warp_ws.rs file
+async fn publish_message(msg: String, topic: String, client: &Client) -> Result<(), Box<dyn Error + Send + Sync>> {
     let payload = json!({
         "user_id": 1,
         "topic": topic,
@@ -285,7 +286,7 @@ async fn check_and_publish_price_change(
     previous_best_prices: Arc<TokioMutex<HashMap<TradingPair, Decimal>>>,
     publish_client: Arc<Client>,
     side: &str,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut previous_best = previous_best_prices.lock().await;
     let price_changed = previous_best
         .get(trading_pair)
