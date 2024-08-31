@@ -49,7 +49,7 @@ async fn client_msg(id: &str, msg: Message, clients: &Clients) {
     println!("received message from {}: {:?}", id, msg);
     let message = match msg.to_str() {
         Ok(v) => v,
-        Err(_) => return,
+        Err(_) => return
     };
 
     if message == "ping" || message == "ping\n" {
