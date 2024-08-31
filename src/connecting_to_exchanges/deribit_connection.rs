@@ -18,15 +18,9 @@ use crate::matching_engine::{engine::{MatchingEngine, TradingPair},
                              orderbook::{Order, BidOrAsk}};
 use crate::warp_websocket::handler::{Event, publish_handler};
 
-// TODO: create more helper functions and refactor the code
-// TODO: I use the websocket wrong. To publish you dont need to call the specific handler but you should post something
-//  On the 'http://localhost:8000/publish' and it will automatically get published.
-//  The deribit exchange does not even have to be a 'client'. (This way is way better and cleaner)
-//  Also, in this way 'clients' does not need to be passed to the deribit part of the code which is awesome
 //  Finally, we can pass an Arc<mutex<MatchingEngine>>> to the ws_handler inside the route definition since
 //  ws_handler connects to the functions in ws.rs which receive messages from the clients (actions to be taken on the matching engine)
 
-// Helper function
 fn make_trading_pair_type(input_from_deribit: &String) -> TradingPair {
     let parts: Vec<&str> = input_from_deribit.split('.').collect();
     let together = parts.get(1).unwrap_or(&"").to_string();
@@ -101,7 +95,6 @@ pub async fn on_incoming_deribit_message(ws_stream_ref: &mut WebSocketStream<May
     // Keeps track of the previous best bids/asks such that we can send updates to the subscribed clients
     let previous_best_bids: Arc<TokioMutex<HashMap<TradingPair, Decimal>>> = Arc::new(TokioMutex::new(HashMap::new()));
     let previous_best_asks: Arc<TokioMutex<HashMap<TradingPair, Decimal>>> = Arc::new(TokioMutex::new(HashMap::new()));
-    // let publish_client: Arc<TokioMutex<&Client>> = Arc::new(TokioMutex::new(&Client::new()));
     let publish_client = Arc::new(Client::new());
     loop {
         match ws_stream_ref.next().await {
@@ -189,112 +182,124 @@ async fn publish_message(msg: String, topic: String, client: &Client) -> Result<
 
 // In here also call the publish_handler from handler.ws (for now only the {pair}_{deribit}_best_bid_change
 // and {pair}_{deribit}_best_ask_change)
-// TODO: refactor and abstract this function (and probably other functions in this file)
-// TODO: also make sure the previous_best_bids and asks are correct since I think they are not implemented correctly (they dont overwrite the previous one correctly or something)
 
-async fn process_message(msg: Message,
-                         matching_engine: Arc<TokioMutex<MatchingEngine>>,
-                         mut previous_best_bids: Arc<TokioMutex<HashMap<TradingPair, Decimal>>>,
-                         mut previous_best_asks: Arc<TokioMutex<HashMap<TradingPair, Decimal>>>,
-                         publish_client: Arc<Client>
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn process_message(
+    msg: Message,
+    matching_engine: Arc<TokioMutex<MatchingEngine>>,
+    previous_best_bids: Arc<TokioMutex<HashMap<TradingPair, Decimal>>>,
+    previous_best_asks: Arc<TokioMutex<HashMap<TradingPair, Decimal>>>,
+    publish_client: Arc<Client>
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let update_msg = match msg {
-        Message::Text(text) => {text},
-        _ => {panic!()}
+        Message::Text(text) => text,
+        _ => return Err("Unexpected message type".into()),
     };
-    let parsed: Value = serde_json::from_str(&update_msg).expect("Can't parse to JSON");
-    if let Some(params) = parsed.get("params") {
-        if let Some(data) = params.get("data") {
-            if let Some(Value::String(trading_pair_string_ref)) = params.get("channel") {
-                let trading_pair = make_trading_pair_type(trading_pair_string_ref);
-                // Process asks
-                if let Some(Value::Array(asks_update)) = data.get("asks") {
-                    if !asks_update.is_empty() {
-                        let mut engine = matching_engine.lock().await;
-                        place_orders(asks_update, BidOrAsk::Ask, trading_pair.clone(), &mut engine);
 
-                        // Now check if the best ask price has changed
-                        let orderbook = engine.orderbooks.get(&trading_pair).ok_or("Orderbook not found")?;
-                        let (best_ask_price, _) = orderbook.asks.first_key_value().ok_or("No asks found")?;
-                        let best_ask_price = best_ask_price.clone();
+    let parsed: Value = serde_json::from_str(&update_msg)?;
+    let (trading_pair, data) = extract_trading_pair_and_data(&parsed)?;
 
-                        // Release the lock on the engine
-                        drop(engine);
+    process_order_updates(
+        &data,
+        "asks",
+        BidOrAsk::Ask,
+        &trading_pair,
+        matching_engine.clone(),
+        previous_best_asks,
+        publish_client.clone(),
+    ).await?;
 
-                        let mut previous_best_a = previous_best_asks.lock().await;
-                        //refactor this a lot
-                        if let Some(previous_ba) = previous_best_a.get(&trading_pair) {
-                            // If the difference is more than 0.0001 we consider it a new best ask
-                            // we can't directly use the != operator
-                            if (best_ask_price - previous_ba).abs() > Decimal::new(1, 4) {
-                                // Update the previous best ask
-                                previous_best_a.entry(trading_pair.clone())
-                                    .and_modify(|e| *e = best_ask_price)
-                                    .or_insert(best_ask_price);
-                                drop(previous_best_a);
-                                // Send an update to the subscribed clients
-                                let topic = format!("{}_deribit_best_ask_change", trading_pair.clone().to_string());
-                                let message = format!("Best ask: {}", best_ask_price);
-                                // let event = Event::new(topic.clone(), None, message);
-                                publish_message(message.clone(), topic, &publish_client).await?;
-                                println!("published {}", message);
-                            }
-                        } else {
-                            // Update the previous best ask
-                            previous_best_a.insert(trading_pair.clone(), best_ask_price);
-                            drop(previous_best_a);
-                            // Send an update to the subscribed clients
-                            let topic = format!("{}_deribit_best_ask_change", trading_pair.clone().to_string());
-                            let message = format!("Best ask: {}", best_ask_price);
-                            publish_message(message.clone(), topic, &publish_client).await?;
-                            println!("published {}", message);
-                        }
-                    }
-                }
-                // Process the bids
-                if let Some(Value::Array(bids_update)) = data.get("bids") {
-                    if !bids_update.is_empty() {
-                        let mut engine = matching_engine.lock().await;
-                        place_orders(bids_update, BidOrAsk::Bid, trading_pair.clone(), &mut engine);
+    process_order_updates(
+        &data,
+        "bids",
+        BidOrAsk::Bid,
+        &trading_pair,
+        matching_engine,
+        previous_best_bids,
+        publish_client,
+    ).await?;
 
-                        // Now check if the best ask price has changed
-                        let orderbook = engine.orderbooks.get(&trading_pair).ok_or("Orderbook not found")?;
-                        let (best_bid_price, _) = orderbook.bids.last_key_value().ok_or("No asks found")?;
-                        let best_bid_price = best_bid_price.clone();
+    Ok(())
+}
 
-                        // Release the lock on the engine
-                        drop(engine);
+fn extract_trading_pair_and_data(parsed: &Value) -> Result<(TradingPair, &Value), Box<dyn Error + Send + Sync>> {
+    let params = parsed.get("params").ok_or("Missing params")?;
+    let data = params.get("data").ok_or("Missing data")?;
+    let trading_pair_string = params.get("channel")
+        .and_then(Value::as_str)
+        .ok_or("Invalid channel")?.to_string();
+    let trading_pair = make_trading_pair_type(&trading_pair_string);
+    Ok((trading_pair, data))
+}
 
-                        let mut previous_best_b = previous_best_bids.lock().await;
+async fn process_order_updates(
+    data: &Value,
+    side: &str,
+    bid_or_ask: BidOrAsk,
+    trading_pair: &TradingPair,
+    matching_engine: Arc<TokioMutex<MatchingEngine>>,
+    previous_best_prices: Arc<TokioMutex<HashMap<TradingPair, Decimal>>>,
+    publish_client: Arc<Client>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if let Some(Value::Array(updates)) = data.get(side) {
+        if !updates.is_empty() {
+            let best_price = update_orders_and_get_best_price(
+                updates,
+                bid_or_ask,
+                trading_pair,
+                matching_engine,
+            ).await?;
 
-                        if let Some(previous_bb) = previous_best_b.get(&trading_pair) {
-
-                            if (best_bid_price - previous_bb).abs() > Decimal::new(1, 4) {
-                                // Update the previous best ask
-                                previous_best_b.entry(trading_pair.clone())
-                                    .and_modify(|e| *e = best_bid_price)
-                                    .or_insert(best_bid_price);
-                                drop(previous_best_b);
-                                // Send an update to the subscribed clients
-                                let topic = format!("{}_deribit_best_bid_change", trading_pair.clone().to_string());
-                                let message = format!("Best bid: {}", best_bid_price);
-                                publish_message(message.clone(), topic, &publish_client).await?;
-                                println!("published {}", message);
-                            }
-                        } else {
-                            // Update the previous best ask
-                            previous_best_b.insert(trading_pair.clone(), best_bid_price);
-                            drop(previous_best_b);
-                            // Send an update to the subscribed clients
-                            let topic = format!("{}_deribit_best_bid_change", trading_pair.clone().to_string());
-                            let message = format!("Best bid: {}", best_bid_price);
-                            publish_message(message.clone(), topic, &publish_client).await?;
-                            println!("published {}", message);
-                        }
-                    }
-                }
-            }
+            check_and_publish_price_change(
+                best_price,
+                trading_pair,
+                previous_best_prices,
+                publish_client,
+                side,
+            ).await?;
         }
     }
+    Ok(())
+}
+
+async fn update_orders_and_get_best_price(
+    updates: &Vec<Value>,
+    bid_or_ask: BidOrAsk,
+    trading_pair: &TradingPair,
+    matching_engine: Arc<TokioMutex<MatchingEngine>>,
+) -> Result<Decimal, Box<dyn Error + Send + Sync>> {
+    let mut engine = matching_engine.lock().await;
+    place_orders(updates, bid_or_ask.clone(), trading_pair.clone(), &mut engine);
+
+    let orderbook = engine.orderbooks.get(trading_pair).ok_or("Orderbook not found")?;
+    let (best_price, _) = match bid_or_ask {
+        BidOrAsk::Ask => orderbook.asks.first_key_value(),
+        BidOrAsk::Bid => orderbook.bids.last_key_value(),
+    }.ok_or("No orders found")?;
+
+    Ok(best_price.clone())
+}
+
+async fn check_and_publish_price_change(
+    new_price: Decimal,
+    trading_pair: &TradingPair,
+    previous_best_prices: Arc<TokioMutex<HashMap<TradingPair, Decimal>>>,
+    publish_client: Arc<Client>,
+    side: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut previous_best = previous_best_prices.lock().await;
+    let price_changed = previous_best
+        .get(trading_pair)
+        .map_or(true, |prev| (new_price - prev).abs() > Decimal::new(1, 4));
+
+    if price_changed {
+        previous_best.insert(trading_pair.clone(), new_price);
+        drop(previous_best);
+
+        let topic = format!("{}_deribit_best_{}_change", trading_pair.clone().to_string(), side.trim_end_matches('s'));
+        let message = format!("Best {}: {}", side.trim_end_matches('s'), new_price);
+        publish_message(message.clone(), topic, &publish_client).await?;
+        println!("published {}", message);
+    }
+
     Ok(())
 }

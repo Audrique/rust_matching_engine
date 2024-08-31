@@ -55,7 +55,7 @@ async fn client_msg(id: &str, msg: Message, clients: &Clients) {
     if message == "ping" || message == "ping\n" {
         println!("Received ping from {}", id);
         let pong_message = Message::text("pong");
-        let mut locked_clients = clients.write().await;
+        let locked_clients = clients.write().await;
         if let Some(client) = locked_clients.get(id) {
             if let Err(e) = client.sender.as_ref().unwrap().send(Ok(pong_message)) {
                 eprintln!("error sending pong message to {}: {}", id, e);
