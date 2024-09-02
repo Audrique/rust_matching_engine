@@ -6,10 +6,10 @@ mod matching_engine;
 
 use std::collections::HashMap;
 use std::convert::Infallible;
-use warp_websocket::handler::TopicActionRequest;
+
 use tokio::sync::{mpsc, oneshot, RwLock, Mutex as TokioMutex};
 use warp::{ws::Message, Filter, Rejection};
-use crate::warp_websocket::handler;
+use crate::warp_websocket::{handler, create_server};
 use std::sync::Arc;
 use matching_engine::{engine::{MatchingEngine, TradingPair}, orderbook::{BidOrAsk, Order}};
 use connecting_to_exchanges::deribit_connection::{authenticate_deribit,
@@ -30,10 +30,6 @@ pub struct Client {
     pub sender: Option<mpsc::UnboundedSender<std::result::Result<Message, warp::Error>>>,
 }
 
-fn with_clients(clients: Clients) -> impl Filter<Extract = (Clients,), Error = Infallible> + Clone {
-    warp::any().map(move || clients.clone())
-}
-
 async fn wait_for_server(rx: oneshot::Receiver<()>) {
     match rx.await {
         Ok(_) => println!("Server is ready, starting to process Deribit messages"),
@@ -48,7 +44,6 @@ async fn main() {
     engine.add_new_market(trading_pair.clone());
 
     let engine = Arc::new(TokioMutex::new(engine));
-    let clients: Clients = Arc::new(RwLock::new(HashMap::new()));
 
     // Create an oneshot-channel for signaling server readiness
     let (tx, rx) = oneshot::channel();
@@ -69,61 +64,8 @@ async fn main() {
         on_incoming_deribit_message(&mut ws_stream, deribit_engine).await;
     });
 
-    // ----------------------------------------------------------------------------------
-    // warp part
-
-    let health_route = warp::path!("health").and_then(handler::health_handler);
-
-    let register = warp::path("register");
-    let register_routes = register
-        .and(warp::post())
-        .and(warp::body::json())
-        .and(with_clients(clients.clone()))
-        .and_then(handler::register_handler)
-        .or(register
-            .and(warp::delete())
-            .and(warp::path::param())
-            .and(with_clients(clients.clone()))
-            .and_then(handler::unregister_handler)
-            );
-
-    let publish = warp::path!("publish")
-        .and(warp::body::json())
-        .and(with_clients(clients.clone()))
-        .and_then(handler::publish_handler);
-
-    let ws_route = warp::path("ws")
-        .and(warp::ws())
-        .and(warp::path::param())
-        .and(with_clients(clients.clone()))
-        .and_then(handler::ws_handler);
-
-    let clients_for_add = clients.clone();
-    let add_topic_route = warp::post()
-        .and(warp::path("add_topic"))
-        .and(warp::body::json::<TopicActionRequest>())
-        .and(warp::any().map(move || clients_for_add.clone()))
-        .and_then(handler::add_topic);
-
-    let clients_for_remove = clients.clone();
-    let remove_topic_route = warp::delete()
-        .and(warp::path("remove_topic"))
-        .and(warp::body::json::<TopicActionRequest>())
-        .and(warp::any().map(move || clients_for_remove.clone()))
-        .and_then(handler::remove_topic);
-
-    let routes = health_route
-        .or(register_routes)
-        .or(ws_route)
-        .or(publish)
-        .or(add_topic_route)
-        .or(remove_topic_route)
-        .with(warp::cors().allow_any_origin());
-
-    // Signal that the server is about to start
-    let _ = tx.send(());
-
-    warp::serve(routes).run(([127, 0, 0, 1], 8000)).await;
+    // Start the warp websocket
+    create_server::start_server(tx).await;
 }
 
 

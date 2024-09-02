@@ -18,7 +18,7 @@ use crate::matching_engine::{engine::{MatchingEngine, TradingPair},
                              orderbook::{Order, BidOrAsk}};
 use crate::warp_websocket::handler::{Event, publish_handler};
 
-//  Finally, we can pass an Arc<mutex<MatchingEngine>>> to the ws_handler inside the route definition since
+//  Pass an Arc<mutex<MatchingEngine>>> to the ws_handler inside the route definition since
 //  ws_handler connects to the functions in ws.rs which receive messages from the clients (actions to be taken on the matching engine)
 
 fn make_trading_pair_type(input_from_deribit: &String) -> TradingPair {
