@@ -60,7 +60,16 @@ pub async fn start_server(tx: oneshot::Sender<()>) {
         .or(add_topic_route)
         .or(remove_topic_route)
         .with(warp::cors().allow_any_origin());
+
+    // TODO: make sure the correct cors are setup (needed for the react frontend)
+    let cors = warp::cors()
+        .allow_any_origin()  // Allow any origin
+        .allow_methods(vec!["GET", "POST", "DELETE", "OPTIONS"])
+        .allow_headers(vec!["Content-Type"]);
+
+    let routes_with_cors = routes.with(cors);
+
     // Signal that the server is about to start
     let _ = tx.send(());
-    warp::serve(routes).run(([127, 0, 0, 1], 8000)).await;
+    warp::serve(routes_with_cors).run(([127, 0, 0, 1], 8000)).await;
 }
