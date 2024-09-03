@@ -66,7 +66,7 @@ pub async fn authenticate_deribit(ws_stream_ref: &mut WebSocketStream<MaybeTlsSt
     // Wait for authentication response
     if let Some(Ok(auth_response)) = ws_stream_ref.next().await {
         if let Message::Text(auth_text) = auth_response {
-            println!("Received auth response: {}", auth_text);
+            println!("Received auth response");
 
             // Parse the response to check for errors
             let auth_response_json: Value = serde_json::from_str(&auth_text).expect("Failed to parse auth response");
@@ -96,9 +96,15 @@ pub async fn on_incoming_deribit_message(ws_stream_ref: &mut WebSocketStream<May
     let previous_best_bids: Arc<TokioMutex<HashMap<TradingPair, Decimal>>> = Arc::new(TokioMutex::new(HashMap::new()));
     let previous_best_asks: Arc<TokioMutex<HashMap<TradingPair, Decimal>>> = Arc::new(TokioMutex::new(HashMap::new()));
     let publish_client = Arc::new(Client::new());
+    let mut is_first_message = true;
     loop {
         match ws_stream_ref.next().await {
             Some(Ok(msg)) => {
+                if is_first_message {
+                    is_first_message = false;
+                    continue; // Skip processing this message (it is a confirmation of the subscription or something
+                }
+
                 let previous_best_bids = Arc::clone(&previous_best_bids);
                 let previous_best_asks = Arc::clone(&previous_best_asks);
                 let matching_engine = Arc::clone(&matching_engine);
