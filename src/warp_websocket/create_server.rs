@@ -61,7 +61,6 @@ pub async fn start_server(tx: oneshot::Sender<()>) {
         .or(remove_topic_route)
         .with(warp::cors().allow_any_origin());
 
-    // TODO: make sure the correct cors are setup (needed for the react frontend)
     let cors = warp::cors()
         .allow_origin("http://localhost:5173")  // Allow any origin
         .allow_methods(vec!["GET", "POST", "DELETE", "OPTIONS"])
