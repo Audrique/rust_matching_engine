@@ -63,9 +63,10 @@ pub async fn start_server(tx: oneshot::Sender<()>) {
 
     // TODO: make sure the correct cors are setup (needed for the react frontend)
     let cors = warp::cors()
-        .allow_any_origin()  // Allow any origin
+        .allow_origin("http://localhost:5173")  // Allow any origin
         .allow_methods(vec!["GET", "POST", "DELETE", "OPTIONS"])
-        .allow_headers(vec!["Content-Type"]);
+        .allow_headers(vec!["Content-Type", "Access-Control-Allow-Origin"])
+        .allow_credentials(true);
 
     let routes_with_cors = routes.with(cors);
 

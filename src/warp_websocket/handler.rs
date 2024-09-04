@@ -1,6 +1,7 @@
 use crate::{Client, Clients, Result};
 use crate::warp_websocket::ws;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use uuid::Uuid;
 use warp::{http::StatusCode, reply::json, ws::Message, Reply};
 #[derive(Deserialize, Debug)]
@@ -21,7 +22,7 @@ pub struct RegisterResponse {
     url: String,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct Event {
     topic: String,
     user_id: Option<usize>,
@@ -49,10 +50,12 @@ pub async fn publish_handler(body: Event, clients: Clients) -> Result<impl Reply
         })
         .filter(|(_, client)| client.topics.contains(&body.topic))
         .for_each(|(_, client)| {
+            let json_message = json!({ "topic": body.topic, "user_id": body.user_id, "message": body.message });
             if let Some(sender) = &client.sender {
-                let _ = sender.send(Ok(Message::text(body.message.clone())));
+                let _ = sender.send(Ok(Message::text(json_message.to_string())));
             }
         });
+
 
     Ok(StatusCode::OK)
 }
