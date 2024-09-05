@@ -188,6 +188,7 @@ pub async fn on_incoming_deribit_message(
                     let publish_client = Arc::clone(&publish_client);
                     // Immediately offload the message processing to another function/task.
                     tokio::spawn(async move {
+                        // TODO: change the process_message and underlying functions to take the parsed data object already
                         if let Err(e) = process_message(msg, matching_engine, previous_best_bids, previous_best_asks, publish_client).await {
                             eprintln!("Error processing message: {:?}", e);
                         }
@@ -196,9 +197,12 @@ pub async fn on_incoming_deribit_message(
                     let current_change_id = data["params"]["data"]["change_id"].as_u64();
                     let current_previous_change_id = data["params"]["data"]["prev_change_id"].as_u64();
                     if let (Some(current_change_id), Some(current_previous_change_id)) = (current_change_id, current_previous_change_id) {
-                        if current_previous_change_id != previous_change_id.unwrap_or_default() {
-                            number_of_missed_changes += 1;
-                            println!("The number of missed updates: {number_of_missed_changes}");
+                        if let Some(prev_id) = previous_change_id {
+                            if current_previous_change_id != prev_id {
+                                number_of_missed_changes += 1;
+                                println!("The number of missed updates: {number_of_missed_changes}");
+                                println!("The previous change was: {:?}, and the expected previous change: {:?}", &previous_change_id, &current_previous_change_id);
+                            }
                         }
                         previous_change_id = Some(current_change_id.clone());
                     }
