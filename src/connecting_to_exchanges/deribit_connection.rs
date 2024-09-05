@@ -192,15 +192,14 @@ pub async fn on_incoming_deribit_message(
                             eprintln!("Error processing message: {:?}", e);
                         }
                     });
+                    // Checking for missed updates
                     let current_change_id = data["params"]["data"]["change_id"].as_u64();
                     let current_previous_change_id = data["params"]["data"]["prev_change_id"].as_u64();
                     if let (Some(current_change_id), Some(current_previous_change_id)) = (current_change_id, current_previous_change_id) {
-                        // Check if the previous change ID matches the last message's change ID
                         if current_previous_change_id != previous_change_id.unwrap_or_default() {
                             number_of_missed_changes += 1;
                             println!("The number of missed updates: {number_of_missed_changes}");
                         }
-                        // Update the previous_change_id to the current change ID for the next iteration
                         previous_change_id = Some(current_change_id.clone());
                     }
                 } else { println!("Received message which we do not process: {:?}", data) }
