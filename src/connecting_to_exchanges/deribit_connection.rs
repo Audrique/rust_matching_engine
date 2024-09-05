@@ -11,9 +11,9 @@ use std::sync::Arc;
 use futures_util::{StreamExt, SinkExt};
 use rust_decimal::{Decimal, prelude::FromPrimitive};
 use tokio::sync::{RwLock, Mutex as TokioMutex};
+use tokio::time::{timeout, Duration};
 use crate::{Clients};
 use reqwest::Client;
-use tokio_tungstenite::tungstenite::client;
 use crate::matching_engine::{engine::{MatchingEngine, TradingPair},
                              orderbook::{Order, BidOrAsk}};
 use crate::warp_websocket::handler::{Event, publish_handler};
@@ -30,12 +30,11 @@ fn make_trading_pair_type(input_from_deribit: &String) -> TradingPair {
     trading_pair
 }
 
-//TODO: Remove the prints and replace it by Ok(), Err()
-pub async fn establish_connection(url: &str) -> WebSocketStream<MaybeTlsStream<TcpStream>>{
+pub async fn establish_connection(url: &str) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, Box<dyn Error>>{
     println!("Trying to connect to: {}", url);
-    let (ws_stream, _) = connect_async(url).await.expect("Failed to connect");
+    let (ws_stream, _) = connect_async(url).await?;
     println!("Connected to Deribit exchange");
-    ws_stream
+    Ok(ws_stream)
 }
 
 pub fn read_config_file() -> (String, String) {
@@ -51,7 +50,7 @@ pub async fn authenticate_deribit(ws_stream_ref: &mut WebSocketStream<MaybeTlsSt
                               client_id: &str, client_secret: &str) {
     let auth_msg = json!({
         "jsonrpc": "2.0",
-        "id": 9929, // I don't understand what the ID is for since we can authenticate with an ID and subscribe with a different ID and it works
+        "id": 9929,
         "method": "public/auth",
         "params": {
             "grant_type": "client_credentials",
@@ -68,7 +67,7 @@ pub async fn authenticate_deribit(ws_stream_ref: &mut WebSocketStream<MaybeTlsSt
         if let Message::Text(auth_text) = auth_response {
             println!("Received auth response");
 
-            // Parse the response to check for errors
+            // Parse the response to check for errors, change this with error propagation?
             let auth_response_json: Value = serde_json::from_str(&auth_text).expect("Failed to parse auth response");
             if auth_response_json.get("error").is_some() {
                 println!("Authentication failed: {:?}", auth_response_json["error"]);
@@ -78,7 +77,7 @@ pub async fn authenticate_deribit(ws_stream_ref: &mut WebSocketStream<MaybeTlsSt
 }
 
 pub async fn subscribe_to_channel(ws_stream_ref: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
-                                  channels: Vec<&String>) {
+                                  channels: Vec<&String>) -> Result<(), Box<dyn Error>> {
     // Subscribe to the raw data channel after authentication
     let msg = json!({
         "method":"public/subscribe",
@@ -87,34 +86,112 @@ pub async fn subscribe_to_channel(ws_stream_ref: &mut WebSocketStream<MaybeTlsSt
         "id":9922
     });
     let msg_text = msg.to_string();
-    ws_stream_ref.send(Message::Text(msg_text)).await.expect("Failed to send message");
+    ws_stream_ref.send(Message::Text(msg_text)).await?;
+    Ok(())
 }
 
-pub async fn on_incoming_deribit_message(ws_stream_ref: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
-                                  matching_engine: Arc<TokioMutex<MatchingEngine>>) {
-    // Keeps track of the previous best bids/asks such that we can send updates to the subscribed clients
+async fn send_heartbeat(ws_stream_ref: &mut WebSocketStream<MaybeTlsStream<TcpStream>>) -> Result<(), Box<dyn Error>> {
+    let heartbeat_response = json!({
+                        "jsonrpc": "2.0",
+                        "id": 888,
+                        "method": "public/test",
+                        "params": {}
+                    });
+    let heartbeat_msg_text = heartbeat_response.to_string();
+    ws_stream_ref.send(Message::Text(heartbeat_msg_text)).await?;
+    Ok(())
+}
+
+pub async fn establish_heartbeat(ws_stream: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
+                                 interval_in_secs: u32) -> Result<(), Box<dyn Error>> {
+    let msg = json!({
+                    "jsonrpc": "2.0",
+                    "id": 9098,
+                    "method": "public/set_heartbeat",
+                    "params": {
+                              "interval": interval_in_secs
+                               }
+    });
+    let heartbeat_msg_text = msg.to_string();
+    ws_stream.send(Message::Text(heartbeat_msg_text)).await?;
+    println!("Send message to establish heartbeat every {interval_in_secs} seconds \n");
+    // Set a maximum waiting time of 5 seconds for the response
+    match timeout(Duration::from_secs(5), ws_stream.next()).await {
+        Ok(Some(Ok(Message::Text(text)))) => {
+            // Parse the incoming message as JSON
+            let data: Value = serde_json::from_str(&text)?;
+
+            // Check if the response matches the expected structure
+            if data["id"] == 9098 && data["result"] == "ok" {
+                println!("Heartbeat successfully established.");
+                Ok(())
+            } else {
+                eprintln!("Unexpected response: {:?}", data);
+                Err("Failed to establish heartbeat".into())
+            }
+        }
+        Ok(Some(Ok(_))) => {
+            // Received a message, but it's not a text message
+            Err("Received unexpected message type".into())
+        }
+        Ok(Some(Err(e))) => {
+            // Error while receiving the message
+            eprintln!("Error receiving response: {:?}", e);
+            Err("Failed to receive a valid response".into())
+        }
+        Ok(None) => {
+            // WebSocket stream closed
+            Err("WebSocket stream closed unexpectedly".into())
+        }
+        Err(_) => {
+            // Timeout occurred
+            Err("Failed to establish heartbeat: no response received within 5 seconds".into())
+        }
+    }
+}
+
+pub async fn on_incoming_deribit_message(
+    ws_stream_ref: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
+    matching_engine: Arc<TokioMutex<MatchingEngine>>
+) {
     let previous_best_bids: Arc<TokioMutex<HashMap<TradingPair, Decimal>>> = Arc::new(TokioMutex::new(HashMap::new()));
     let previous_best_asks: Arc<TokioMutex<HashMap<TradingPair, Decimal>>> = Arc::new(TokioMutex::new(HashMap::new()));
     let publish_client = Arc::new(Client::new());
-    let mut is_first_message = true;
+
     loop {
+        // Only handle messages from the WebSocket stream.
         match ws_stream_ref.next().await {
             Some(Ok(msg)) => {
-                if is_first_message {
-                    is_first_message = false;
-                    continue; // Skip processing this message (it is a confirmation of the subscription or something
-                }
-
-                let previous_best_bids = Arc::clone(&previous_best_bids);
-                let previous_best_asks = Arc::clone(&previous_best_asks);
-                let matching_engine = Arc::clone(&matching_engine);
-                let publish_client = Arc::clone(&publish_client);
-                // Immediately offload the message processing to another function/task.
-                tokio::spawn(async move {
-                    if let Err(e) = process_message(msg, matching_engine, previous_best_bids, previous_best_asks, publish_client).await {
-                        eprintln!("Error processing message: {:?}", e);
+                let text = msg.to_string();
+                let data: Value = match serde_json::from_str(&text) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        eprintln!("Error parsing message: {:?}", e);
+                        continue;
                     }
-                });
+                };
+                if data["method"] == "heartbeat" {
+                    println!("Heartbeat received");
+                    send_heartbeat(ws_stream_ref).await.expect("Problem sending heartbeat");
+                    println!("Heartbeat sent");
+                    // This is the id with which we send the heartbeat, the response will have the same id
+                } else if data["id"] == 888 {
+                    continue
+                } else if data["id"] == 9922 {
+                    println!("Subscription response result: {:?}", data["result"]);
+                    continue
+                } else if data["method"] == "subscription" {
+                    let previous_best_bids = Arc::clone(&previous_best_bids);
+                    let previous_best_asks = Arc::clone(&previous_best_asks);
+                    let matching_engine = Arc::clone(&matching_engine);
+                    let publish_client = Arc::clone(&publish_client);
+                    // Immediately offload the message processing to another function/task.
+                    tokio::spawn(async move {
+                        if let Err(e) = process_message(msg, matching_engine, previous_best_bids, previous_best_asks, publish_client).await {
+                            eprintln!("Error processing message: {:?}", e);
+                        }
+                    });
+                } else { println!("Received message which we do not process: {:?}", data) }
             },
             Some(Err(e)) => {
                 eprintln!("Error receiving message: {:?}", e);
@@ -170,8 +247,6 @@ fn place_orders(update: &Vec<Value>,
     }
 }
 
-// TODO: Add a client with user_id = 98326 and match this with the below user_id, which we thus use for publishing (now it is matched
-//  with the test_warp_ws.rs file
 async fn publish_message(msg: String, topic: String, client: &Client) -> Result<(), Box<dyn Error + Send + Sync>> {
     let payload = json!({
         "user_id": 1,
@@ -204,7 +279,7 @@ async fn process_message(
 
     let parsed: Value = serde_json::from_str(&update_msg)?;
     let (trading_pair, data) = extract_trading_pair_and_data(&parsed)?;
-
+    println!("{:?}", &data);
     process_order_updates(
         &data,
         "asks",

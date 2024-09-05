@@ -6,7 +6,7 @@ mod matching_engine;
 
 use std::collections::HashMap;
 use std::convert::Infallible;
-
+use std::error::Error;
 use tokio::sync::{mpsc, oneshot, RwLock, Mutex as TokioMutex};
 use warp::{ws::Message, Filter, Rejection};
 use crate::warp_websocket::{handler, create_server};
@@ -16,7 +16,8 @@ use connecting_to_exchanges::deribit_connection::{authenticate_deribit,
                                                   establish_connection,
                                                   on_incoming_deribit_message,
                                                   read_config_file,
-                                                  subscribe_to_channel};
+                                                  subscribe_to_channel,
+                                                  establish_heartbeat};
 use tokio;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -52,13 +53,14 @@ async fn main() {
     let deribit_engine = engine.clone();
     tokio::spawn(async move {
         let url_deribit = "wss://www.deribit.com/ws/api/v2";
-        let mut ws_stream = establish_connection(url_deribit).await;
+        let mut ws_stream = establish_connection(url_deribit).await.unwrap();
         let (client_id, client_secret) = read_config_file();
 
         authenticate_deribit(&mut ws_stream, &client_id, &client_secret).await;
         let channel_btc_usdt = &format!("book.{}.raw", trading_pair.to_string());
         let channels = vec![channel_btc_usdt];
-        subscribe_to_channel(&mut ws_stream, channels).await;
+        establish_heartbeat(&mut ws_stream, 10).await.unwrap();
+        subscribe_to_channel(&mut ws_stream, channels).await.unwrap();
         // Wait for the server to be ready before processing messages
         wait_for_server(rx).await;
         on_incoming_deribit_message(&mut ws_stream, deribit_engine).await;
