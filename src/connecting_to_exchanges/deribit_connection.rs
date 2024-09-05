@@ -114,7 +114,7 @@ pub async fn establish_heartbeat(ws_stream: &mut WebSocketStream<MaybeTlsStream<
     });
     let heartbeat_msg_text = msg.to_string();
     ws_stream.send(Message::Text(heartbeat_msg_text)).await?;
-    println!("Send message to establish heartbeat every {interval_in_secs} seconds \n");
+    println!("Sent message to establish heartbeat every {interval_in_secs} seconds");
     // Set a maximum waiting time of 5 seconds for the response
     match timeout(Duration::from_secs(5), ws_stream.next()).await {
         Ok(Some(Ok(Message::Text(text)))) => {
@@ -157,7 +157,8 @@ pub async fn on_incoming_deribit_message(
     let previous_best_bids: Arc<TokioMutex<HashMap<TradingPair, Decimal>>> = Arc::new(TokioMutex::new(HashMap::new()));
     let previous_best_asks: Arc<TokioMutex<HashMap<TradingPair, Decimal>>> = Arc::new(TokioMutex::new(HashMap::new()));
     let publish_client = Arc::new(Client::new());
-
+    let mut previous_change_id: Option<u64> = None;
+    let mut number_of_missed_changes: u32 = 0;
     loop {
         // Only handle messages from the WebSocket stream.
         match ws_stream_ref.next().await {
@@ -191,6 +192,17 @@ pub async fn on_incoming_deribit_message(
                             eprintln!("Error processing message: {:?}", e);
                         }
                     });
+                    let current_change_id = data["params"]["data"]["change_id"].as_u64();
+                    let current_previous_change_id = data["params"]["data"]["prev_change_id"].as_u64();
+                    if let (Some(current_change_id), Some(current_previous_change_id)) = (current_change_id, current_previous_change_id) {
+                        // Check if the previous change ID matches the last message's change ID
+                        if current_previous_change_id != previous_change_id.unwrap_or_default() {
+                            number_of_missed_changes += 1;
+                            println!("The number of missed updates: {number_of_missed_changes}");
+                        }
+                        // Update the previous_change_id to the current change ID for the next iteration
+                        previous_change_id = Some(current_change_id.clone());
+                    }
                 } else { println!("Received message which we do not process: {:?}", data) }
             },
             Some(Err(e)) => {
@@ -279,7 +291,6 @@ async fn process_message(
 
     let parsed: Value = serde_json::from_str(&update_msg)?;
     let (trading_pair, data) = extract_trading_pair_and_data(&parsed)?;
-    println!("{:?}", &data);
     process_order_updates(
         &data,
         "asks",
