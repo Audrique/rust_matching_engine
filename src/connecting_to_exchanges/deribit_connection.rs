@@ -303,7 +303,6 @@ async fn process_message(
         previous_best_asks,
         publish_client.clone(),
     ).await?;
-
     process_order_updates(
         &data,
         "bids",
@@ -313,7 +312,6 @@ async fn process_message(
         previous_best_bids,
         publish_client,
     ).await?;
-
     Ok(())
 }
 

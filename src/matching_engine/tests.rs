@@ -3,8 +3,47 @@ use crate::matching_engine::engine::{TradingPair, MatchingEngine};
 
 #[cfg(test)]
 pub mod tests {
+    use rust_decimal::Decimal;
     use rust_decimal_macros::dec;
     use super::*;
+
+    #[test]
+    fn test_best_bid_ask() {
+        let trader_id = String::from("trader_id_audrique");
+        let mut engine = MatchingEngine::new();
+        let pair = TradingPair::new("BTC".to_string(), "USDT".to_string());
+        engine.add_new_market(pair.clone());
+
+        let b1_order = Order::new(BidOrAsk::Bid, 5.5, trader_id.clone(), "-1".to_string());
+        let b2_order = Order::new(BidOrAsk::Bid, 10.5, trader_id.clone(), "-1".to_string());
+        let s1_order = Order::new(BidOrAsk::Ask, 4.5, trader_id.clone(), "-1".to_string());
+        let s2_order = Order::new(BidOrAsk::Ask, 11.5, trader_id.clone(), "-1".to_string());
+
+        engine.place_limit_order(pair.clone(), dec!(30_000.0), b1_order).unwrap();
+        engine.place_limit_order(pair.clone(), dec!(31_000.0), b2_order).unwrap();
+        engine.place_limit_order(pair.clone(), dec!(32_000.0), s1_order).unwrap();
+        engine.place_limit_order(pair.clone(), dec!(33_000.0), s2_order).unwrap();
+        let (best_ask, _) = engine.orderbooks.get(&pair).unwrap().asks.first_key_value().unwrap();
+        let (best_bid, _) = engine.orderbooks.get(&pair).unwrap().bids.last_key_value().unwrap();
+        assert_eq!(best_ask.clone(), dec!(32_000));
+        assert_eq!(best_bid.clone(), dec!(31_000));
+        engine.leave_volume_from_exchange(
+            pair.clone(),
+            BidOrAsk::Bid,
+            dec!(31_000.0),
+            0.0
+        ).unwrap();
+        engine.leave_volume_from_exchange(
+            pair.clone(),
+            BidOrAsk::Ask,
+            dec!(32_000.0),
+            0.0
+        ).unwrap();
+        let (best_ask, _) = engine.orderbooks.get(&pair).unwrap().asks.first_key_value().unwrap();
+        let (best_bid, _) = engine.orderbooks.get(&pair).unwrap().bids.last_key_value().unwrap();
+        assert_eq!(best_ask.clone(), dec!(33_000));
+        assert_eq!(best_bid.clone(), dec!(30_000));
+    }
 
     #[test]
     fn test_engine() {
@@ -107,8 +146,6 @@ pub mod tests {
     #[test]
     fn check_open_orders() {
         let mut orderbook = Orderbook::new();
-
-        let price = dec!(10_000.0);
         let trader_id = "trader_1".to_string();
 
         let buy_limit_order_a = Order::new(BidOrAsk::Bid, 100.0, trader_id.clone(), "0".to_string());
@@ -181,15 +218,14 @@ pub mod tests {
         orderbook.fill_market_order(&mut market_order);
 
         let ask_limits = orderbook.ask_limits();
-        let matched_limit = ask_limits.get(1).unwrap();//.orders.get(0).unwrap();
+        // let matched_limit = ask_limits.get(1).unwrap();//.orders.get(0).unwrap();
         assert_eq!(market_order.is_filled(), true);
         assert_eq!(ask_limits.len(), 3);
     }
 
     #[test]
     fn limit_total_volume() {
-        let price = dec!(10_000.0);
-        let mut limit = Limit::new(price);
+        let mut limit = Limit::new(dec!(10_000.0));
         let trader_id = "trader_audrique".to_string();
 
         let buy_limit_order_a = Order::new(BidOrAsk::Bid, 100.0, trader_id.clone(), "0".to_string());
