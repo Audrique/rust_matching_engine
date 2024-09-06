@@ -41,6 +41,7 @@ async fn wait_for_server(rx: oneshot::Receiver<()>) {
 #[tokio::main]
 async fn main() {
     let trading_pair = TradingPair::new("BTC".to_string(), "USDT".to_string());
+    let trading_pairs = vec![trading_pair.clone()];
     let mut engine = MatchingEngine::new();
     engine.add_new_market(trading_pair.clone());
 
@@ -63,7 +64,7 @@ async fn main() {
         subscribe_to_channel(&mut ws_stream, channels).await.unwrap();
         // Wait for the server to be ready before processing messages
         wait_for_server(rx).await;
-        on_incoming_deribit_message(&mut ws_stream, deribit_engine).await;
+        on_incoming_deribit_message(&mut ws_stream, deribit_engine, trading_pairs).await;
     });
 
     // Start the warp websocket

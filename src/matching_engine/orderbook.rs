@@ -1,7 +1,7 @@
 use std::collections::{HashMap, BTreeMap};
 use rust_decimal::prelude::*;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum BidOrAsk {
     Bid,
     Ask,
@@ -190,8 +190,6 @@ impl Limit {
 
     //TODO: At this moment self trades are avoided by just ignoring each trader's
     // other trades. This has to be change by not letting you place the order in the first place.
-    // The orders from the websocket are ALLOWED to self trade. Make sure this is implemented in a way.
-    // order_id = -1
     pub fn fill_order(&mut self, market_order: &mut Order) {
         let mut i = 0;
 

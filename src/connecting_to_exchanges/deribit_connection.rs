@@ -14,6 +14,7 @@ use tokio::sync::{RwLock, Mutex as TokioMutex};
 use tokio::time::{timeout, Duration};
 use crate::{Clients};
 use reqwest::Client;
+use serde::ser::SerializeTuple;
 use crate::matching_engine::{engine::{MatchingEngine, TradingPair},
                              orderbook::{Order, BidOrAsk}};
 use crate::warp_websocket::handler::{Event, publish_handler};
@@ -149,13 +150,28 @@ pub async fn establish_heartbeat(ws_stream: &mut WebSocketStream<MaybeTlsStream<
         }
     }
 }
+fn initialize_on_hold_changes(trading_pairs: Vec<TradingPair>,
+) -> Arc<TokioMutex<HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, f64>>>>> {
+    let mut outer_map = HashMap::new();
+
+    for pair in trading_pairs {
+        let mut inner_map = HashMap::new();
+        inner_map.insert(BidOrAsk::Bid, HashMap::new());
+        inner_map.insert(BidOrAsk::Ask, HashMap::new());
+        outer_map.insert(pair, inner_map);
+    }
+
+    Arc::new(TokioMutex::new(outer_map))
+}
 
 pub async fn on_incoming_deribit_message(
     ws_stream_ref: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
-    matching_engine: Arc<TokioMutex<MatchingEngine>>
+    matching_engine: Arc<TokioMutex<MatchingEngine>>,
+    trading_pairs: Vec<TradingPair>,
 ) {
     let previous_best_bids: Arc<TokioMutex<HashMap<TradingPair, Decimal>>> = Arc::new(TokioMutex::new(HashMap::new()));
     let previous_best_asks: Arc<TokioMutex<HashMap<TradingPair, Decimal>>> = Arc::new(TokioMutex::new(HashMap::new()));
+    let on_hold_changes = initialize_on_hold_changes(trading_pairs);
     let publish_client = Arc::new(Client::new());
     let mut previous_change_id: Option<u64> = None;
     let mut number_of_missed_changes: u32 = 0;
@@ -186,10 +202,11 @@ pub async fn on_incoming_deribit_message(
                     let previous_best_asks = Arc::clone(&previous_best_asks);
                     let matching_engine = Arc::clone(&matching_engine);
                     let publish_client = Arc::clone(&publish_client);
+                    let on_hold_changes = Arc::clone(&on_hold_changes);
                     // Immediately offload the message processing to another function/task.
+                    let msg = data.clone();
                     tokio::spawn(async move {
-                        // TODO: change the process_message and underlying functions to take the parsed data object already
-                        if let Err(e) = process_message(msg, matching_engine, previous_best_bids, previous_best_asks, publish_client).await {
+                        if let Err(e) = process_message(msg, matching_engine, previous_best_bids, previous_best_asks, publish_client, on_hold_changes).await {
                             eprintln!("Error processing message: {:?}", e);
                         }
                     });
@@ -220,46 +237,92 @@ pub async fn on_incoming_deribit_message(
 fn place_orders(update: &Vec<Value>,
                 bid_or_ask: BidOrAsk,
                 trading_pair: TradingPair,
-                matching_engine: &mut MatchingEngine) {
+                matching_engine: &mut MatchingEngine,
+                on_hold_changes: &mut HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, f64>>>,
+) {
     for price_level in update {
         if let Some(Value::String(type_of_update)) = &price_level.get(0) {
             if let Some(Value::Number(price)) = &price_level.get(1) {
                 let price = Decimal::from_f64(price.as_f64().unwrap()).unwrap();
+                let mut check_price_in_orderbook = true;
+                // TODO: we should make sure that we only take prices into account
+                //  which have an order with order_id ="-1"
+                match bid_or_ask {
+                    BidOrAsk::Ask => {check_price_in_orderbook = matching_engine.orderbooks.get(&trading_pair).unwrap().asks.contains_key(&price);
+                    },
+                    BidOrAsk::Bid => {check_price_in_orderbook = matching_engine.orderbooks.get(&trading_pair).unwrap().bids.contains_key(&price);}
+                }
                 if let Some(Value::Number(volume)) = &price_level.get(2){
                     let volume = volume.as_f64().unwrap();
                     match type_of_update.as_str() {
                         "delete" => {
-                            matching_engine.leave_volume_from_exchange(
-                                trading_pair.clone(),
-                                bid_or_ask.clone(),
-                                price,
-                                volume // In this case the volume is always 0.0 -> maybe change it? or keep it as an extra 'check'
-                            ).unwrap();
+                            if check_price_in_orderbook {
+                                matching_engine.leave_volume_from_exchange(
+                                    trading_pair.clone(),
+                                    bid_or_ask.clone(),
+                                    price,
+                                    volume // In this case the volume is always 0.0 -> maybe change it? or keep it as an extra 'check'
+                                ).unwrap();
+                            } else {on_hold_changes
+                                .get_mut(&trading_pair)
+                                .unwrap()
+                                .get_mut(&bid_or_ask)
+                                .unwrap()
+                                .insert(price, volume);}
                         },
                         "new" => { // This case is correct
                             matching_engine.place_limit_order(
                                 trading_pair.clone(),
-                                price,
+                                price.clone(),
                                 Order::new(bid_or_ask.clone(),
                                            volume,
                                            "deribit".to_string(),
                                            "-1".to_string())
                             ).unwrap();
+                            let volume_on_hold = on_hold_changes.
+                                get_mut(&trading_pair)
+                                .unwrap()
+                                .get_mut(&bid_or_ask)
+                                .unwrap()
+                                .get(&price).unwrap_or(&-999.0);
+
+                            if volume_on_hold >= &0.0 {
+                                matching_engine.leave_volume_from_exchange(
+                                    trading_pair.clone(),
+                                    bid_or_ask.clone(),
+                                    price.clone(),
+                                    volume_on_hold.clone()
+                                ).unwrap();
+                                on_hold_changes
+                                    .get_mut(&trading_pair)
+                                    .unwrap()
+                                    .get_mut(&bid_or_ask)
+                                    .unwrap()
+                                    .remove(&price);
+                            }
                         },
                         "change" => {
-                            matching_engine.leave_volume_from_exchange(
-                                trading_pair.clone(),
-                                bid_or_ask.clone(),
-                                price,
-                                volume
-                            ).unwrap();
+                            if check_price_in_orderbook {
+                                matching_engine.leave_volume_from_exchange(
+                                    trading_pair.clone(),
+                                    bid_or_ask.clone(),
+                                    price,
+                                    volume
+                                ).unwrap();
+                            } {on_hold_changes
+                                .get_mut(&trading_pair)
+                                .unwrap()
+                                .get_mut(&bid_or_ask)
+                                .unwrap()
+                                .insert(price, volume);}
                         },
-                        _ => () // maybe put a panic here or something
+                        _ => {eprintln!("Update type not one of 'change', 'new' or 'delete'! ")}
                     }
                 }
             }
         }
     }
+    println!("{:?}", on_hold_changes);
 }
 
 async fn publish_message(msg: String, topic: String, client: &Client) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -281,19 +344,15 @@ async fn publish_message(msg: String, topic: String, client: &Client) -> Result<
 // and {pair}_{deribit}_best_ask_change)
 
 async fn process_message(
-    msg: Message,
+    msg: Value,
     matching_engine: Arc<TokioMutex<MatchingEngine>>,
     previous_best_bids: Arc<TokioMutex<HashMap<TradingPair, Decimal>>>,
     previous_best_asks: Arc<TokioMutex<HashMap<TradingPair, Decimal>>>,
-    publish_client: Arc<Client>
+    publish_client: Arc<Client>,
+    on_hold_changes: Arc<TokioMutex<HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, f64>>>>>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let update_msg = match msg {
-        Message::Text(text) => text,
-        _ => return Err("Unexpected message type".into()),
-    };
 
-    let parsed: Value = serde_json::from_str(&update_msg)?;
-    let (trading_pair, data) = extract_trading_pair_and_data(&parsed)?;
+    let (trading_pair, data) = extract_trading_pair_and_data(&msg)?;
     process_order_updates(
         &data,
         "asks",
@@ -302,6 +361,7 @@ async fn process_message(
         matching_engine.clone(),
         previous_best_asks,
         publish_client.clone(),
+        on_hold_changes.clone(),
     ).await?;
     process_order_updates(
         &data,
@@ -311,6 +371,7 @@ async fn process_message(
         matching_engine,
         previous_best_bids,
         publish_client,
+        on_hold_changes,
     ).await?;
     Ok(())
 }
@@ -333,7 +394,9 @@ async fn process_order_updates(
     matching_engine: Arc<TokioMutex<MatchingEngine>>,
     previous_best_prices: Arc<TokioMutex<HashMap<TradingPair, Decimal>>>,
     publish_client: Arc<Client>,
+    on_hold_changes: Arc<TokioMutex<HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, f64>>>>>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    // TODO? maybe change this such that the updates is still of type Value and we can access the elements by the 'key'
     if let Some(Value::Array(updates)) = data.get(side) {
         if !updates.is_empty() {
             let best_price = update_orders_and_get_best_price(
@@ -341,6 +404,7 @@ async fn process_order_updates(
                 bid_or_ask,
                 trading_pair,
                 matching_engine,
+                on_hold_changes,
             ).await?;
 
             check_and_publish_price_change(
@@ -360,9 +424,11 @@ async fn update_orders_and_get_best_price(
     bid_or_ask: BidOrAsk,
     trading_pair: &TradingPair,
     matching_engine: Arc<TokioMutex<MatchingEngine>>,
+    on_hold_changes: Arc<TokioMutex<HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, f64>>>>>,
 ) -> Result<Decimal, Box<dyn Error + Send + Sync>> {
     let mut engine = matching_engine.lock().await;
-    place_orders(updates, bid_or_ask.clone(), trading_pair.clone(), &mut engine);
+    let mut on_hold_changes_ = on_hold_changes.lock().await;
+    place_orders(updates, bid_or_ask.clone(), trading_pair.clone(), &mut engine, &mut on_hold_changes_);
 
     let orderbook = engine.orderbooks.get(trading_pair).ok_or("Orderbook not found")?;
     let (best_price, _) = match bid_or_ask {
