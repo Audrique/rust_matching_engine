@@ -234,6 +234,10 @@ pub async fn on_incoming_deribit_message(
     }
 }
 
+// TODO: In 'on_hold_changes', add a local timestamp when we add it to the hashmaps and then after looping through
+//  all changes removed the entrees over '30 seconds' old or something (put the waiting_time as a parameter),
+//  because now consider that somehow we never get a 'new' and then 10 minutes later we get one
+//  but it clearly should not get changed by the previous 'on_hold_change' for that price.
 fn place_orders(update: &Vec<Value>,
                 bid_or_ask: BidOrAsk,
                 trading_pair: TradingPair,
@@ -244,19 +248,28 @@ fn place_orders(update: &Vec<Value>,
         if let Some(Value::String(type_of_update)) = &price_level.get(0) {
             if let Some(Value::Number(price)) = &price_level.get(1) {
                 let price = Decimal::from_f64(price.as_f64().unwrap()).unwrap();
-                let mut check_price_in_orderbook = true;
-                // TODO: we should make sure that we only take prices into account
-                //  which have an order with order_id ="-1"
+                let mut check_exchange_order_in_orderbook = true;
                 match bid_or_ask {
-                    BidOrAsk::Ask => {check_price_in_orderbook = matching_engine.orderbooks.get(&trading_pair).unwrap().asks.contains_key(&price);
+                    BidOrAsk::Ask => {check_exchange_order_in_orderbook = matching_engine
+                        .orderbooks
+                        .get(&trading_pair).unwrap()
+                        .asks.get(&price).map_or(false, |limit| {
+                        limit.check_exchange_order_in_limit()
+                        });
                     },
-                    BidOrAsk::Bid => {check_price_in_orderbook = matching_engine.orderbooks.get(&trading_pair).unwrap().bids.contains_key(&price);}
+                    BidOrAsk::Bid => {check_exchange_order_in_orderbook = matching_engine
+                        .orderbooks
+                        .get(&trading_pair).unwrap()
+                        .asks.get(&price).map_or(false, |limit| {
+                        limit.check_exchange_order_in_limit()
+                        });
+                    }
                 }
                 if let Some(Value::Number(volume)) = &price_level.get(2){
                     let volume = volume.as_f64().unwrap();
                     match type_of_update.as_str() {
                         "delete" => {
-                            if check_price_in_orderbook {
+                            if check_exchange_order_in_orderbook {
                                 matching_engine.leave_volume_from_exchange(
                                     trading_pair.clone(),
                                     bid_or_ask.clone(),
@@ -302,7 +315,7 @@ fn place_orders(update: &Vec<Value>,
                             }
                         },
                         "change" => {
-                            if check_price_in_orderbook {
+                            if check_exchange_order_in_orderbook {
                                 matching_engine.leave_volume_from_exchange(
                                     trading_pair.clone(),
                                     bid_or_ask.clone(),
@@ -316,13 +329,16 @@ fn place_orders(update: &Vec<Value>,
                                 .unwrap()
                                 .insert(price, volume);}
                         },
-                        _ => {eprintln!("Update type not one of 'change', 'new' or 'delete'! ")}
+                        _ => {eprintln!("Update-type not one of 'change', 'new' or 'delete'! ")}
                     }
                 }
             }
         }
     }
-    println!("{:?}", on_hold_changes);
+    // println!("{:?}", on_hold_changes);
+    // let length = on_hold_changes.get(&trading_pair).unwrap().get(&BidOrAsk::Bid).unwrap().len() +
+    //     on_hold_changes.get(&trading_pair).unwrap().get(&BidOrAsk::Ask).unwrap().len();
+    // println!("{:?}", length);
 }
 
 async fn publish_message(msg: String, topic: String, client: &Client) -> Result<(), Box<dyn Error + Send + Sync>> {

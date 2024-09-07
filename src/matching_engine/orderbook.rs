@@ -249,6 +249,10 @@ impl Limit {
             }
         }
     }
+
+    pub fn check_exchange_order_in_limit(&self) -> bool {
+        self.orders.iter().any(|order| order.order_id == "-1")
+    }
 }
 #[derive(Debug, Clone)]
 pub struct Order {
