@@ -164,6 +164,10 @@ fn initialize_on_hold_changes(trading_pairs: Vec<TradingPair>,
     Arc::new(TokioMutex::new(outer_map))
 }
 
+// deribit can change to exchange later
+// Topics: {pair}_{deribit}_best_bid_change, sends the best bid price if it changes (volume could be included later)
+//         {pair}_{deribit}_best_ask_change, sends the best ask price if it changes (idem as above)
+//         {pair}_{deribit}_top_10_asks_bids_periodically, sends the top 10 bids and asks every 100ms (prices and volume)
 pub async fn on_incoming_deribit_message(
     ws_stream_ref: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
     matching_engine: Arc<TokioMutex<MatchingEngine>>,
@@ -171,10 +175,44 @@ pub async fn on_incoming_deribit_message(
 ) {
     let previous_best_bids: Arc<TokioMutex<HashMap<TradingPair, Decimal>>> = Arc::new(TokioMutex::new(HashMap::new()));
     let previous_best_asks: Arc<TokioMutex<HashMap<TradingPair, Decimal>>> = Arc::new(TokioMutex::new(HashMap::new()));
-    let on_hold_changes = initialize_on_hold_changes(trading_pairs);
+    let on_hold_changes = initialize_on_hold_changes(trading_pairs.clone());
     let publish_client = Arc::new(Client::new());
     let mut previous_change_id: Option<u64> = None;
     let mut number_of_missed_changes: u32 = 0;
+
+    // Spawn a new task for periodic publishing
+    let periodic_publish_task = {
+        let matching_engine = Arc::clone(&matching_engine);
+        let publish_client = Arc::clone(&publish_client);
+        tokio::spawn(async move {
+            loop {
+                // Use this to automatically close the lock
+                let _ = {
+                    let engine = matching_engine.lock().await;
+                    for t_pair in &trading_pairs {
+                        let orderbook = engine.orderbooks.get(t_pair).ok_or("Orderbook not found").unwrap();
+                        let top_10_asks: Vec<(Decimal, f64)> = orderbook.asks.iter()
+                            .take(10)
+                            .map(|(price, limit)| (price.clone(), limit.total_volume()))
+                            .collect();
+                        let top_10_bids: Vec<(Decimal, f64)> = orderbook.bids.iter()
+                            .rev()
+                            .take(10)
+                            .map(|(price, limit)| (price.clone(), limit.total_volume()))
+                            .collect();
+                        let topic = format!("{}_deribit_top_10_asks_bids_periodically", t_pair.clone().to_string());
+                        let message = format!("Top 10 asks: {:?}; Top 10 bids: {:?}", top_10_asks, top_10_bids);
+                        println!("The message: {:?}", message);
+                        publish_message(message.clone(), topic, &publish_client).await.unwrap();
+                    }
+                };
+                // Wait for 250 ms
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+        })
+    };
+
+
     loop {
         // Only handle messages from the WebSocket stream.
         match ws_stream_ref.next().await {
@@ -232,6 +270,7 @@ pub async fn on_incoming_deribit_message(
             None => break, // Exit the loop if the stream is closed.
         }
     }
+    periodic_publish_task.abort();
 }
 
 fn place_orders(update: &Vec<Value>,
@@ -340,11 +379,7 @@ fn place_orders(update: &Vec<Value>,
             price_map.retain(|_, (_, timestamp)| cleanup_time.duration_since(*timestamp) <= time_until_forget_on_hold);
         }
     }
-
     println!("{:?}", on_hold_changes);
-    // let length = on_hold_changes.get(&trading_pair).unwrap().get(&BidOrAsk::Bid).unwrap().len() +
-    //     on_hold_changes.get(&trading_pair).unwrap().get(&BidOrAsk::Ask).unwrap().len();
-    // println!("{:?}", length);
 }
 
 async fn publish_message(msg: String, topic: String, client: &Client) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -361,9 +396,6 @@ async fn publish_message(msg: String, topic: String, client: &Client) -> Result<
     }
     Ok(())
 }
-
-// In here also call the publish_handler from handler.ws (for now only the {pair}_{deribit}_best_bid_change
-// and {pair}_{deribit}_best_ask_change)
 
 async fn process_message(
     msg: Value,

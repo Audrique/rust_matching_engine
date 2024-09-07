@@ -170,8 +170,6 @@ impl Limit {
         }
     }
 
-    // this maybe change to a self.total_volume and add the volume when a new order comes
-    // and subtract when volume is filled (this way it is more efficient)
     pub fn total_volume(&self) -> f64 {
         self.orders
             .iter()

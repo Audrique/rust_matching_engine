@@ -45,7 +45,7 @@ pub async fn client_connection(ws: WebSocket, id: String, clients: Clients, mut 
     println!("{} disconnected", id);
 }
 
-async fn client_msg(id: &str, msg: Message, clients: &Clients) {
+async fn client_msg(id: &str, msg: Message, clients: &Clients, ) {
     println!("received message from {}: {:?}", id, msg);
     let message = match msg.to_str() {
         Ok(v) => v,
