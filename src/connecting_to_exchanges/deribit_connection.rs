@@ -234,10 +234,6 @@ pub async fn on_incoming_deribit_message(
     }
 }
 
-// TODO: In 'on_hold_changes', add a local timestamp when we add it to the hashmaps and then after looping through
-//  all changes removed the entrees over '30 seconds' old or something (put the waiting_time as a parameter),
-//  because now consider that somehow we never get a 'new' and then 10 minutes later we get one
-//  but it clearly should not get changed by the previous 'on_hold_change' for that price.
 fn place_orders(update: &Vec<Value>,
                 bid_or_ask: BidOrAsk,
                 trading_pair: TradingPair,
