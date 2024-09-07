@@ -11,7 +11,7 @@ use std::sync::Arc;
 use futures_util::{StreamExt, SinkExt};
 use rust_decimal::{Decimal, prelude::FromPrimitive};
 use tokio::sync::{RwLock, Mutex as TokioMutex};
-use tokio::time::{timeout, Duration};
+use tokio::time::{timeout, Duration, Instant};
 use crate::{Clients};
 use reqwest::Client;
 use serde::ser::SerializeTuple;
@@ -151,7 +151,7 @@ pub async fn establish_heartbeat(ws_stream: &mut WebSocketStream<MaybeTlsStream<
     }
 }
 fn initialize_on_hold_changes(trading_pairs: Vec<TradingPair>,
-) -> Arc<TokioMutex<HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, f64>>>>> {
+) -> Arc<TokioMutex<HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, (f64, Instant)>>>>> {
     let mut outer_map = HashMap::new();
 
     for pair in trading_pairs {
@@ -242,29 +242,29 @@ fn place_orders(update: &Vec<Value>,
                 bid_or_ask: BidOrAsk,
                 trading_pair: TradingPair,
                 matching_engine: &mut MatchingEngine,
-                on_hold_changes: &mut HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, f64>>>,
+                on_hold_changes: &mut HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, (f64, Instant)>>>,
+                time_until_forget_on_hold: Duration,
 ) {
     for price_level in update {
         if let Some(Value::String(type_of_update)) = &price_level.get(0) {
             if let Some(Value::Number(price)) = &price_level.get(1) {
                 let price = Decimal::from_f64(price.as_f64().unwrap()).unwrap();
-                let mut check_exchange_order_in_orderbook = true;
-                match bid_or_ask {
-                    BidOrAsk::Ask => {check_exchange_order_in_orderbook = matching_engine
+                let check_exchange_order_in_orderbook = match bid_or_ask {
+                    BidOrAsk::Ask => {matching_engine
                         .orderbooks
                         .get(&trading_pair).unwrap()
                         .asks.get(&price).map_or(false, |limit| {
                         limit.check_exchange_order_in_limit()
-                        });
+                        })
                     },
-                    BidOrAsk::Bid => {check_exchange_order_in_orderbook = matching_engine
+                    BidOrAsk::Bid => {matching_engine
                         .orderbooks
                         .get(&trading_pair).unwrap()
-                        .asks.get(&price).map_or(false, |limit| {
+                        .bids.get(&price).map_or(false, |limit| {
                         limit.check_exchange_order_in_limit()
-                        });
+                        })
                     }
-                }
+                };
                 if let Some(Value::Number(volume)) = &price_level.get(2){
                     let volume = volume.as_f64().unwrap();
                     match type_of_update.as_str() {
@@ -281,7 +281,7 @@ fn place_orders(update: &Vec<Value>,
                                 .unwrap()
                                 .get_mut(&bid_or_ask)
                                 .unwrap()
-                                .insert(price, volume);}
+                                .insert(price, (volume, Instant::now()));}
                         },
                         "new" => { // This case is correct
                             matching_engine.place_limit_order(
@@ -297,14 +297,16 @@ fn place_orders(update: &Vec<Value>,
                                 .unwrap()
                                 .get_mut(&bid_or_ask)
                                 .unwrap()
-                                .get(&price).unwrap_or(&-999.0);
+                                .get(&price)
+                                .map(|&(vol, _)| vol)
+                                .unwrap_or(-999.0);
 
-                            if volume_on_hold >= &0.0 {
+                            if volume_on_hold >= 0.0 {
                                 matching_engine.leave_volume_from_exchange(
                                     trading_pair.clone(),
                                     bid_or_ask.clone(),
                                     price.clone(),
-                                    volume_on_hold.clone()
+                                    volume_on_hold
                                 ).unwrap();
                                 on_hold_changes
                                     .get_mut(&trading_pair)
@@ -327,7 +329,7 @@ fn place_orders(update: &Vec<Value>,
                                 .unwrap()
                                 .get_mut(&bid_or_ask)
                                 .unwrap()
-                                .insert(price, volume);}
+                                .insert(price, (volume, Instant::now()));}
                         },
                         _ => {eprintln!("Update-type not one of 'change', 'new' or 'delete'! ")}
                     }
@@ -335,7 +337,15 @@ fn place_orders(update: &Vec<Value>,
             }
         }
     }
-    // println!("{:?}", on_hold_changes);
+    // Clean up on_hold_change
+    let cleanup_time = Instant::now();
+    for (_, bid_ask_map) in on_hold_changes.iter_mut() {
+        for (_, price_map) in bid_ask_map.iter_mut() {
+            price_map.retain(|_, (_, timestamp)| cleanup_time.duration_since(*timestamp) <= time_until_forget_on_hold);
+        }
+    }
+
+    println!("{:?}", on_hold_changes);
     // let length = on_hold_changes.get(&trading_pair).unwrap().get(&BidOrAsk::Bid).unwrap().len() +
     //     on_hold_changes.get(&trading_pair).unwrap().get(&BidOrAsk::Ask).unwrap().len();
     // println!("{:?}", length);
@@ -365,7 +375,7 @@ async fn process_message(
     previous_best_bids: Arc<TokioMutex<HashMap<TradingPair, Decimal>>>,
     previous_best_asks: Arc<TokioMutex<HashMap<TradingPair, Decimal>>>,
     publish_client: Arc<Client>,
-    on_hold_changes: Arc<TokioMutex<HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, f64>>>>>,
+    on_hold_changes: Arc<TokioMutex<HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, (f64, Instant)>>>>>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let (trading_pair, data) = extract_trading_pair_and_data(&msg)?;
@@ -410,7 +420,7 @@ async fn process_order_updates(
     matching_engine: Arc<TokioMutex<MatchingEngine>>,
     previous_best_prices: Arc<TokioMutex<HashMap<TradingPair, Decimal>>>,
     publish_client: Arc<Client>,
-    on_hold_changes: Arc<TokioMutex<HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, f64>>>>>,
+    on_hold_changes: Arc<TokioMutex<HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, (f64, Instant)>>>>>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     // TODO? maybe change this such that the updates is still of type Value and we can access the elements by the 'key'
     if let Some(Value::Array(updates)) = data.get(side) {
@@ -440,11 +450,11 @@ async fn update_orders_and_get_best_price(
     bid_or_ask: BidOrAsk,
     trading_pair: &TradingPair,
     matching_engine: Arc<TokioMutex<MatchingEngine>>,
-    on_hold_changes: Arc<TokioMutex<HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, f64>>>>>,
+    on_hold_changes: Arc<TokioMutex<HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, (f64, Instant)>>>>>,
 ) -> Result<Decimal, Box<dyn Error + Send + Sync>> {
     let mut engine = matching_engine.lock().await;
     let mut on_hold_changes_ = on_hold_changes.lock().await;
-    place_orders(updates, bid_or_ask.clone(), trading_pair.clone(), &mut engine, &mut on_hold_changes_);
+    place_orders(updates, bid_or_ask.clone(), trading_pair.clone(), &mut engine, &mut on_hold_changes_, Duration::from_secs(2));
 
     let orderbook = engine.orderbooks.get(trading_pair).ok_or("Orderbook not found")?;
     let (best_price, _) = match bid_or_ask {
