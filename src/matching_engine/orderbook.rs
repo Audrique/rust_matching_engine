@@ -50,6 +50,8 @@ impl Orderbook {
             }
     }
 
+    // TODO: return trades: (trader_id of the taker, trader_id of the maker, price, volume)
+    //  Since it also needs to return the size already (the remaining volume), return a tuple of the two returns?
     pub fn fill_limit_order(&mut self, limit_order: &mut Order, price: Decimal) -> f64 { // Has to return the matches from the filling
 
         let limits: Vec<&mut Limit> = match limit_order.bid_or_ask {
@@ -79,9 +81,6 @@ impl Orderbook {
             BidOrAsk::Bid => for price in prices_to_remove {self.asks.remove(&price);}
             BidOrAsk::Ask => for price in prices_to_remove {self.bids.remove(&price);}
         }
-        // if we get here we need to put add the order to the orderbook (since it took all the available volume for it
-        //  but still has remaining volume)
-        println!("{:?}", limit_order.size);
         limit_order.size
     }
 
@@ -93,6 +92,7 @@ impl Orderbook {
         self.bids.values_mut().rev().collect()
     }
 
+    // TODO: return trades: (trader_id of the taker, trader_id of the maker, price, volume)
     pub fn add_limit_order(&mut self, price: Decimal, mut order: Order) {
         match order.bid_or_ask {
             BidOrAsk::Bid => {
@@ -246,6 +246,9 @@ impl Limit {
 
     //TODO: At this moment self trades are avoided by just ignoring each trader's
     // other trades. This has to be change by not letting you place the order in the first place.
+
+    // TODO: return trades that happened at the given limit (trader_id of the taker, trader_id of the maker, price, volume)
+    //  but the price is not in this function since we are working at limit level here.
     pub fn fill_order(&mut self, market_order: &mut Order) {
         let mut i = 0;
 
