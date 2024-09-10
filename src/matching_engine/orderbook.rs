@@ -1,5 +1,7 @@
 use std::collections::{HashMap, BTreeMap};
+use std::cmp::Ordering;
 use rust_decimal::prelude::*;
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum BidOrAsk {
@@ -41,10 +43,46 @@ impl Orderbook {
                 break;
             }
         }
+
         match market_order.bid_or_ask {
             BidOrAsk::Bid => for price in prices_to_remove {self.asks.remove(&price);}
             BidOrAsk::Ask => for price in prices_to_remove {self.bids.remove(&price);}
             }
+    }
+
+    pub fn fill_limit_order(&mut self, limit_order: &mut Order, price: Decimal) -> f64 { // Has to return the matches from the filling
+
+        let limits: Vec<&mut Limit> = match limit_order.bid_or_ask {
+            BidOrAsk::Bid => self.asks
+                .range_mut(..=price)
+                .map(|(_, limit)| limit)
+                .collect(),
+            BidOrAsk::Ask => self.bids
+                .range_mut(price..)
+                .map(|(_, limit)| limit)
+                .collect(),
+        };
+
+        let mut prices_to_remove = Vec::new();
+
+        for limit in limits {
+            limit.fill_order(limit_order);
+            if limit.orders.len() == 0 {
+                prices_to_remove.push(limit.price);
+            }
+
+            if limit_order.is_filled() {
+                break;
+            }
+        }
+        match limit_order.bid_or_ask {
+            BidOrAsk::Bid => for price in prices_to_remove {self.asks.remove(&price);}
+            BidOrAsk::Ask => for price in prices_to_remove {self.bids.remove(&price);}
+        }
+        // if we get here we need to put add the order to the orderbook (since it took all the available volume for it
+        //  but still has remaining volume)
+        println!("{:?}", limit_order.size);
+        limit_order.size
     }
 
     pub fn ask_limits(&mut self) -> Vec<&mut Limit> {
@@ -55,7 +93,8 @@ impl Orderbook {
         self.bids.values_mut().rev().collect()
     }
 
-    pub fn add_limit_order(&mut self, price: Decimal, order: Order) {
+    // TODO: in here check if there should be a trade taking place
+    pub fn add_limit_order(&mut self, price: Decimal, mut order: Order) {
         match order.bid_or_ask {
             BidOrAsk::Bid => {
                 match self.bids.get_mut(&price) {
@@ -63,9 +102,13 @@ impl Orderbook {
                         limit.add_order(order);
                     },
                     None => {
-                        let mut limit = Limit::new(price);
-                        limit.add_order(order);
-                        self.bids.insert(price, limit);
+                        let remaining_volume = self.fill_limit_order(&mut order.clone(), price);
+                        if remaining_volume > 0.0 {
+                            let mut limit = Limit::new(price);
+                            order.size = remaining_volume;
+                            limit.add_order(order);
+                            self.bids.insert(price, limit);
+                        }
                     },
                 }
 
@@ -75,9 +118,13 @@ impl Orderbook {
                     limit.add_order(order);
                 },
                 None => {
-                    let mut limit = Limit::new(price);
-                    limit.add_order(order);
-                    self.asks.insert(price, limit);
+                    let remaining_volume = self.fill_limit_order(&mut order.clone(), price);
+                    if remaining_volume > 0.0 {
+                        let mut limit = Limit::new(price);
+                        order.size = remaining_volume;
+                        limit.add_order(order);
+                        self.asks.insert(price, limit);
+                    }
                 },
             }
         }
@@ -162,6 +209,18 @@ pub struct Limit {
     pub orders: Vec<Order>,
 }
 
+impl PartialEq for Limit {
+    fn eq(&self, other: &Self) -> bool {
+        self.price == other.price
+    }
+}
+
+impl PartialOrd for Limit {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.price.partial_cmp(&other.price)
+    }
+}
+
 impl Limit {
     pub fn new(price: Decimal) -> Limit {
         Limit{
@@ -236,10 +295,6 @@ impl Limit {
     }
 
     pub fn leave_volume_from_exchange_orders(&mut self, leave_volume: f64) {
-        // Just put the .size of the order_id="-1" to the correct leaves_volume
-        // but for this make sure we can only have one order per price level with order_id -1
-        // put this extra checker in the 'place_limit_order' function of the orderbook/limit
-        // self.orders.remove(i)
         if let Some(idx) = self.orders.iter().position(|order| order.order_id == "-1") {
             match leave_volume == 0.0 {
                 true => {self.orders.remove(idx);},

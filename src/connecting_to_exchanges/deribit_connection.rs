@@ -202,7 +202,7 @@ pub async fn on_incoming_deribit_message(
                             .collect();
                         let topic = format!("{}_deribit_top_10_asks_bids_periodically", t_pair.clone().to_string());
                         let message = format!("Top 10 asks: {:?}; Top 10 bids: {:?}", top_10_asks, top_10_bids);
-                        println!("The message: {:?}", message);
+                        // println!("The message: {:?}", message);
                         publish_message(message.clone(), topic, &publish_client).await.unwrap();
                     }
                 };
@@ -379,7 +379,7 @@ fn place_orders(update: &Vec<Value>,
             price_map.retain(|_, (_, timestamp)| cleanup_time.duration_since(*timestamp) <= time_until_forget_on_hold);
         }
     }
-    println!("{:?}", on_hold_changes);
+    // println!("{:?}", on_hold_changes);
 }
 
 async fn publish_message(msg: String, topic: String, client: &Client) -> Result<(), Box<dyn Error + Send + Sync>> {

@@ -8,6 +8,41 @@ pub mod tests {
     use super::*;
 
     #[test]
+    fn test_trades() {
+        let mut engine = MatchingEngine::new();
+        let pair = TradingPair::new("BTC".to_string(), "USDT".to_string());
+        engine.add_new_market(pair.clone());
+        let b1_order = Order::new(BidOrAsk::Bid, 5.5, "trader_1".to_string(), "1".to_string());
+        let s1_order = Order::new(BidOrAsk::Ask, 8.5, "trader_2".to_string(), "-1".to_string());
+        engine.place_limit_order(pair.clone(), dec!(30_000.0), b1_order).unwrap();
+        engine.place_limit_order(pair.clone(), dec!(30_000.0), s1_order).unwrap();
+        let bids_test = &engine.orderbooks.get(&pair).unwrap().bids;
+        let remaining_volume: f64 = engine.orderbooks.get(&pair).unwrap().asks.get(&dec!(30_000.0)).unwrap().total_volume();
+        assert_eq!(bids_test.is_empty(), true);
+        assert_eq!(remaining_volume, 3.0);
+
+        let b1_order = Order::new(BidOrAsk::Bid, 5.5, "trader_1".to_string(), "1".to_string());
+        engine.place_limit_order(pair.clone(), dec!(30_000.0), b1_order).unwrap();
+        let asks_test = &engine.orderbooks.get(&pair).unwrap().asks;
+        let remaining_volume: f64 = engine.orderbooks.get(&pair).unwrap().bids.get(&dec!(30_000.0)).unwrap().total_volume();
+        assert_eq!(asks_test.is_empty(), true);
+        assert_eq!(remaining_volume, 2.5);
+
+        let b1_order = Order::new(BidOrAsk::Bid, 4.0, "trader_1".to_string(), "1".to_string());
+        engine.place_limit_order(pair.clone(), dec!(29_000.0), b1_order).unwrap();
+        let s1_order = Order::new(BidOrAsk::Ask, 8.5, "trader_2".to_string(), "-1".to_string());
+        engine.place_limit_order(pair.clone(), dec!(30_000.0), s1_order).unwrap();
+        let remaining_volume_asks: f64 = engine.orderbooks.get(&pair).unwrap().asks.get(&dec!(30_000.0)).unwrap().total_volume();
+        let remaining_volume_bids: f64 = engine.orderbooks.get(&pair).unwrap().bids.get(&dec!(29_000.0)).unwrap().total_volume();
+        let price_is_in_or_not = engine.orderbooks.get(&pair).unwrap().bids.contains_key(&dec!(30_000.0));
+        assert_eq!(price_is_in_or_not, false);
+        assert_eq!(remaining_volume_asks, 6.0);
+        assert_eq!(remaining_volume_bids, 4.0);
+
+
+
+    }
+    #[test]
     fn test_best_bid_ask() {
         let trader_id = String::from("trader_id_audrique");
         let mut engine = MatchingEngine::new();
