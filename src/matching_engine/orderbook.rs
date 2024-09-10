@@ -93,7 +93,6 @@ impl Orderbook {
         self.bids.values_mut().rev().collect()
     }
 
-    // TODO: in here check if there should be a trade taking place
     pub fn add_limit_order(&mut self, price: Decimal, mut order: Order) {
         match order.bid_or_ask {
             BidOrAsk::Bid => {
@@ -294,6 +293,8 @@ impl Limit {
         }
     }
 
+    // This makes our engine conservative since once the order_id="-1" is first in a certain limit
+    // it stays first, even after changes (it always keeps time priority).
     pub fn leave_volume_from_exchange_orders(&mut self, leave_volume: f64) {
         if let Some(idx) = self.orders.iter().position(|order| order.order_id == "-1") {
             match leave_volume == 0.0 {

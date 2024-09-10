@@ -59,6 +59,7 @@ impl MatchingEngine {
         println!("opening new orderbook for market {:?}", pair.to_string());
     }
 
+    // TODO: this function needs to return as a result the trades that happened in
     pub fn place_limit_order(&mut self,
                              pair: TradingPair,
                              price: Decimal,
