@@ -1,12 +1,32 @@
 use std::collections::{HashMap, BTreeMap};
 use std::cmp::Ordering;
 use rust_decimal::prelude::*;
-
+use tokio::time::Instant;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum BidOrAsk {
     Bid,
     Ask,
+}
+
+#[derive(Debug, Clone)]
+pub struct Trade {
+    pub trader_id_taker: String,
+    pub trader_id_maker: String,
+    pub volume: f64,
+    pub price: Decimal,
+    timestamp: Instant
+}
+impl Trade {
+    pub fn new(trader_id_taker: String, trader_id_maker: String, volume: f64, price: Decimal, timestamp: Instant) -> Trade {
+        Trade {
+            trader_id_taker,
+            trader_id_maker,
+            volume,
+            price,
+            timestamp,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -24,17 +44,19 @@ impl Orderbook {
     }
 
 
-    pub fn fill_market_order(&mut self, market_order: &mut Order) { // Has to return the matches from the filling
+    pub fn fill_market_order(&mut self, market_order: &mut Order) -> Vec<Trade> { // Has to return the matches from the filling
 
         let limits = match market_order.bid_or_ask {
             BidOrAsk::Bid => {self.ask_limits()},
             BidOrAsk::Ask => {self.bid_limits()}
         };
 
-        let mut prices_to_remove = Vec::new();
+        let mut prices_to_remove: Vec<Decimal> = Vec::new();
+        let mut happened_trades: Vec<Trade> = Vec::new();
 
         for limit in limits {
-            limit.fill_order(market_order);
+            let trades = limit.fill_order(market_order, limit.price.clone());
+            happened_trades.extend(trades);
             if limit.orders.len() == 0 {
             prices_to_remove.push(limit.price);
             }
@@ -48,11 +70,10 @@ impl Orderbook {
             BidOrAsk::Bid => for price in prices_to_remove {self.asks.remove(&price);}
             BidOrAsk::Ask => for price in prices_to_remove {self.bids.remove(&price);}
             }
+        happened_trades
     }
 
-    // TODO: return trades: (trader_id of the taker, trader_id of the maker, price, volume)
-    //  Since it also needs to return the size already (the remaining volume), return a tuple of the two returns?
-    pub fn fill_limit_order(&mut self, limit_order: &mut Order, price: Decimal) -> f64 { // Has to return the matches from the filling
+    pub fn fill_limit_order(&mut self, limit_order: &mut Order, price: Decimal) -> (f64, Vec<Trade>) { // Has to return the matches from the filling
 
         let limits: Vec<&mut Limit> = match limit_order.bid_or_ask {
             BidOrAsk::Bid => self.asks
@@ -66,9 +87,10 @@ impl Orderbook {
         };
 
         let mut prices_to_remove = Vec::new();
-
+        let mut happened_trades: Vec<Trade> = Vec::new();
         for limit in limits {
-            limit.fill_order(limit_order);
+            let trades_at_limit = limit.fill_order(limit_order, limit.price.clone());
+            happened_trades.extend(trades_at_limit);
             if limit.orders.len() == 0 {
                 prices_to_remove.push(limit.price);
             }
@@ -81,7 +103,7 @@ impl Orderbook {
             BidOrAsk::Bid => for price in prices_to_remove {self.asks.remove(&price);}
             BidOrAsk::Ask => for price in prices_to_remove {self.bids.remove(&price);}
         }
-        limit_order.size
+        (limit_order.size, happened_trades)
     }
 
     pub fn ask_limits(&mut self) -> Vec<&mut Limit> {
@@ -92,22 +114,23 @@ impl Orderbook {
         self.bids.values_mut().rev().collect()
     }
 
-    // TODO: return trades: (trader_id of the taker, trader_id of the maker, price, volume)
-    pub fn add_limit_order(&mut self, price: Decimal, mut order: Order) {
+    pub fn add_limit_order(&mut self, price: Decimal, mut order: Order) -> Vec<Trade> {
         match order.bid_or_ask {
             BidOrAsk::Bid => {
                 match self.bids.get_mut(&price) {
                     Some(limit) => {
                         limit.add_order(order);
+                        return Vec::new()
                     },
                     None => {
-                        let remaining_volume = self.fill_limit_order(&mut order.clone(), price);
+                        let (remaining_volume, trades) = self.fill_limit_order(&mut order.clone(), price);
                         if remaining_volume > 0.0 {
                             let mut limit = Limit::new(price);
                             order.size = remaining_volume;
                             limit.add_order(order);
                             self.bids.insert(price, limit);
                         }
+                        return trades
                     },
                 }
 
@@ -115,19 +138,20 @@ impl Orderbook {
             BidOrAsk::Ask => match self.asks.get_mut(&price) {
                 Some(limit) => {
                     limit.add_order(order);
+                    return Vec::new()
                 },
                 None => {
-                    let remaining_volume = self.fill_limit_order(&mut order.clone(), price);
+                    let (remaining_volume, trades) = self.fill_limit_order(&mut order.clone(), price);
                     if remaining_volume > 0.0 {
                         let mut limit = Limit::new(price);
                         order.size = remaining_volume;
                         limit.add_order(order);
                         self.asks.insert(price, limit);
                     }
+                    return trades
                 },
             }
         }
-
     }
     pub fn cancel_order(&mut self, bid_or_ask: BidOrAsk, price: Decimal, order_id: String) {
         let mut prices_to_remove = Vec::new();
@@ -247,10 +271,9 @@ impl Limit {
     //TODO: At this moment self trades are avoided by just ignoring each trader's
     // other trades. This has to be change by not letting you place the order in the first place.
 
-    // TODO: return trades that happened at the given limit (trader_id of the taker, trader_id of the maker, price, volume)
-    //  but the price is not in this function since we are working at limit level here.
-    pub fn fill_order(&mut self, market_order: &mut Order) {
+    pub fn fill_order(&mut self, market_order: &mut Order, price: Decimal) -> Vec<Trade> {
         let mut i = 0;
+        let mut happened_trades: Vec<Trade> = Vec::new();
 
         while i < self.orders.len() {
             let limit_order = &mut self.orders[i];
@@ -259,12 +282,30 @@ impl Limit {
                 match market_order.size >= limit_order.size {
                     true => {
                         market_order.size -= limit_order.size;
+                        happened_trades.push(
+                            Trade::new(
+                                market_order.trader_id.clone(),
+                                limit_order.trader_id.clone(),
+                                limit_order.size.clone(),
+                                price.clone(),
+                                Instant::now())
+                        );
                         limit_order.size = 0.0;
                         self.orders.remove(i);
+
                         continue;
                     }
                     false => {
                         limit_order.size -= market_order.size;
+                        happened_trades.push(
+                            Trade::new(
+                                market_order.trader_id.clone(),
+                                limit_order.trader_id.clone(),
+                                market_order.size.clone(),
+                                price.clone(),
+                                Instant::now()
+                            )
+                        );
                         market_order.size = 0.0;
                     }
                 }
@@ -275,6 +316,7 @@ impl Limit {
             }
             i += 1;
         }
+        happened_trades
     }
 
     pub fn add_order(&mut self, order: Order) {

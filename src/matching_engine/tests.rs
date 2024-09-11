@@ -8,14 +8,44 @@ pub mod tests {
     use super::*;
 
     #[test]
+    fn test_returning_of_trades() {
+        let mut engine = MatchingEngine::new();
+        let pair = TradingPair::new("BTC".to_string(), "USDT".to_string());
+        engine.add_new_market(pair.clone());
+        let trade_1 = engine.place_limit_order(pair.clone(),
+                                               dec!(30_000.0),
+                                               Order::new(BidOrAsk::Bid, 1.1, "trader_1".to_string(), "1".to_string())
+        ).unwrap();
+        let trade_2 = engine.place_limit_order(pair.clone(),
+                                               dec!(30_000.0),
+                                               Order::new(BidOrAsk::Bid, 1.2, "trader_2".to_string(), "1".to_string())
+        ).unwrap();
+        let trade_3 = engine.place_limit_order(pair.clone(),
+                                               dec!(31_000.0),
+                                               Order::new(BidOrAsk::Bid, 1.3, "trader_3".to_string(), "1".to_string())
+        ).unwrap();
+        let trade_4 = engine.place_limit_order(pair.clone(),
+                                               dec!(29_000.0),
+                                               Order::new(BidOrAsk::Ask, 2.5, "trader_4".to_string(), "1".to_string())
+        ).unwrap();
+        assert_eq!(trade_1.is_empty(), true);
+        assert_eq!(trade_2.is_empty(), true);
+        assert_eq!(trade_3.is_empty(), true);
+        assert_eq!(trade_4.len(), 3);
+        let ob_bid_remaining_size = engine.orderbooks.get(&pair).unwrap()
+            .bids.get(&dec!(31_000.0)).unwrap()
+            .orders.get(0).unwrap().size;
+        assert_eq!(ob_bid_remaining_size, 1.1);
+    }
+    #[test]
     fn test_trades() {
         let mut engine = MatchingEngine::new();
         let pair = TradingPair::new("BTC".to_string(), "USDT".to_string());
         engine.add_new_market(pair.clone());
         let b1_order = Order::new(BidOrAsk::Bid, 5.5, "trader_1".to_string(), "1".to_string());
         let s1_order = Order::new(BidOrAsk::Ask, 8.5, "trader_2".to_string(), "-1".to_string());
-        engine.place_limit_order(pair.clone(), dec!(30_000.0), b1_order).unwrap();
-        engine.place_limit_order(pair.clone(), dec!(30_000.0), s1_order).unwrap();
+        let _trade_1 = engine.place_limit_order(pair.clone(), dec!(30_000.0), b1_order).unwrap();
+        let _trade_2 = engine.place_limit_order(pair.clone(), dec!(30_000.0), s1_order).unwrap();
         let bids_test = &engine.orderbooks.get(&pair).unwrap().bids;
         let remaining_volume: f64 = engine.orderbooks.get(&pair).unwrap().asks.get(&dec!(30_000.0)).unwrap().total_volume();
         assert_eq!(bids_test.is_empty(), true);
@@ -222,7 +252,6 @@ pub mod tests {
         orderbook.add_limit_order(dec!(100), Order::new(BidOrAsk::Ask, 10.0, "trader2".to_string(), "1".to_string()));
         assert_eq!(orderbook.asks.len(), 2);
         orderbook.cancel_order(BidOrAsk::Ask,dec!(500), "0".to_string());
-        println!("{:?}", orderbook);
         assert_eq!(orderbook.asks.len(), 1);
     }
     #[test]
@@ -280,8 +309,9 @@ pub mod tests {
 
         let mut market_sell_order = Order::new(BidOrAsk::Ask, 99.0, "trader_2".to_string(), "1".to_string());
 
-        limit.fill_order(&mut market_sell_order);
-
+        let trades = limit.fill_order(&mut market_sell_order, price.clone());
+        assert_eq!(trades[0].volume, 99.0);
+        assert_eq!(trades[0].trader_id_maker, String::from("trader_audrique"));
         assert_eq!(market_sell_order.is_filled(), true);
         assert_eq!(limit.orders.get(0).unwrap().size, 1.0);
     }
@@ -319,12 +349,11 @@ pub mod tests {
 
         let mut market_sell_order = Order::new(BidOrAsk::Ask, 100.0, "trader1".to_string(), "2".to_string());
 
-        limit.fill_order(&mut market_sell_order);
+        let trades = limit.fill_order(&mut market_sell_order, price.clone());
 
         assert_eq!(market_sell_order.is_filled(), true);
         assert_eq!(limit.orders.get(0).unwrap().is_filled(), false);
         assert_eq!(limit.orders.len(), 1);
-
-        println!("{:?}", limit);
+        assert_eq!(trades[0].price, price.clone());
     }
 }
