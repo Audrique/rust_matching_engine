@@ -44,7 +44,7 @@ impl Orderbook {
     }
 
 
-    pub fn fill_market_order(&mut self, market_order: &mut Order) -> Vec<Trade> { // Has to return the matches from the filling
+    pub fn fill_market_order(&mut self, market_order: &mut Order) -> Vec<Trade> {
 
         let limits = match market_order.bid_or_ask {
             BidOrAsk::Bid => {self.ask_limits()},
@@ -73,7 +73,7 @@ impl Orderbook {
         happened_trades
     }
 
-    pub fn fill_limit_order(&mut self, limit_order: &mut Order, price: Decimal) -> (f64, Vec<Trade>) { // Has to return the matches from the filling
+    pub fn fill_limit_order(&mut self, limit_order: &mut Order, price: Decimal) -> (f64, Vec<Trade>) {
 
         let limits: Vec<&mut Limit> = match limit_order.bid_or_ask {
             BidOrAsk::Bid => self.asks
@@ -268,9 +268,8 @@ impl Limit {
             .collect()
     }
 
-    //TODO: At this moment self trades are avoided by just ignoring each trader's
-    // other trades. This has to be change by not letting you place the order in the first place.
-
+    // At this moment self trades are avoided by just ignoring each trader's
+    // other trades. Change this to not letting you place the order in the first place?
     pub fn fill_order(&mut self, market_order: &mut Order, price: Decimal) -> Vec<Trade> {
         let mut i = 0;
         let mut happened_trades: Vec<Trade> = Vec::new();
@@ -328,10 +327,10 @@ impl Limit {
         } else {self.orders.push(order);}
     }
 
-    //TODO: needs to return if the cancellation was a success or not
+    //needs to return if the cancellation was a success or not
     // to cancel an order you have to give the price and the order_id.
     // However, the price is used to get the correct limit (so only in
-    // the part of the orderbook for canceling.
+    // the part of the orderbook for canceling).
     pub fn cancel_order(&mut self, order_id: String) {
         if let Some(index) = self.orders.iter().position(|a| a.order_id == order_id){
             self.orders.remove(index);

@@ -1,17 +1,17 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
-use tokio::sync::oneshot;
-use tokio::sync::RwLock;
+use tokio::sync::{oneshot, RwLock, Mutex as TokioMutex};
 use warp::Filter;
 use crate::warp_websocket::{handler, handler::TopicActionRequest};
 use crate::{Clients};
-
+use crate::matching_engine::engine::MatchingEngine;
 
 fn with_clients(clients: Clients) -> impl Filter<Extract = (Clients,), Error = Infallible> + Clone {
     warp::any().map(move || clients.clone())
 }
-pub async fn start_server(tx: oneshot::Sender<()>) {
+
+pub async fn start_server(tx: oneshot::Sender<()>, matching_engine: Arc<TokioMutex<MatchingEngine>>) {
     let clients: Clients = Arc::new(RwLock::new(HashMap::new()));
     let health_route = warp::path!("health").and_then(handler::health_handler);
 
@@ -37,6 +37,7 @@ pub async fn start_server(tx: oneshot::Sender<()>) {
         .and(warp::ws())
         .and(warp::path::param())
         .and(with_clients(clients.clone()))
+        .and(warp::any().map(move || matching_engine.clone()))
         .and_then(handler::ws_handler);
 
     let clients_for_add = clients.clone();

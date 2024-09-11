@@ -1,9 +1,13 @@
+use std::sync::Arc;
 use crate::{Client, Clients, Result};
 use crate::warp_websocket::ws;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 use warp::{http::StatusCode, reply::json, ws::Message, Reply};
+use crate::matching_engine::engine::MatchingEngine;
+use tokio::sync::Mutex as TokioMutex;
+
 #[derive(Deserialize, Debug)]
 pub struct RegisterRequest {
     user_id: usize,
@@ -87,10 +91,10 @@ pub async fn unregister_handler(id: String, clients: Clients) -> Result<impl Rep
     Ok(StatusCode::OK)
 }
 
-pub async fn ws_handler(ws: warp::ws::Ws, id: String, clients: Clients) -> Result<impl Reply> {
+pub async fn ws_handler(ws: warp::ws::Ws, id: String, clients: Clients, matching_engine: Arc<TokioMutex<MatchingEngine>>) -> Result<impl Reply> {
     let client = clients.read().await.get(&id).cloned();
     match client {
-        Some(c) => Ok(ws.on_upgrade(move |socket| ws::client_connection(socket, id, clients, c))),
+        Some(c) => Ok(ws.on_upgrade(move |socket| ws::client_connection(socket, id, clients, c, matching_engine))),
         None => Err(warp::reject::not_found()),
     }
 }

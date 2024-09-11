@@ -1,3 +1,5 @@
+use std::sync::Arc;
+use tokio::sync::Mutex as TokioMutex;
 use crate::{Client, Clients};
 use futures::{FutureExt, StreamExt};
 use futures_util::SinkExt;
@@ -7,13 +9,14 @@ use serde_json::from_str;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use warp::ws::{Message, WebSocket};
+use crate::matching_engine::engine::MatchingEngine;
 
 #[derive(Deserialize, Debug)]
 pub struct TopicsRequest {
     topics: Vec<String>,
 }
 
-pub async fn client_connection(ws: WebSocket, id: String, clients: Clients, mut client: Client) {
+pub async fn client_connection(ws: WebSocket, id: String, clients: Clients, mut client: Client, matching_engine: Arc<TokioMutex<MatchingEngine>>) {
     let (client_ws_sender, mut client_ws_rcv) = ws.split();
     let (client_sender, client_rcv) = mpsc::unbounded_channel();
 
@@ -37,7 +40,7 @@ pub async fn client_connection(ws: WebSocket, id: String, clients: Clients, mut 
                 break;
             }
         };
-        client_msg(&id, msg, &clients).await;
+        client_msg(&id, msg, &clients, matching_engine.clone()).await;
     }
 
     // Only get here when we get an error and then remove the id
@@ -45,7 +48,7 @@ pub async fn client_connection(ws: WebSocket, id: String, clients: Clients, mut 
     println!("{} disconnected", id);
 }
 
-async fn client_msg(id: &str, msg: Message, clients: &Clients, ) {
+async fn client_msg(id: &str, msg: Message, clients: &Clients, matching_engine: Arc<TokioMutex<MatchingEngine>>) {
     println!("received message from {}: {:?}", id, msg);
     let message = match msg.to_str() {
         Ok(v) => v,
