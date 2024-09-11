@@ -19,9 +19,6 @@ use crate::matching_engine::{engine::{MatchingEngine, TradingPair},
                              orderbook::{Order, BidOrAsk}};
 use crate::warp_websocket::handler::{Event, publish_handler};
 
-//  Pass an Arc<mutex<MatchingEngine>>> to the ws_handler inside the route definition since
-//  ws_handler connects to the functions in ws.rs which receive messages from the clients (actions to be taken on the matching engine)
-
 fn make_trading_pair_type(input_from_deribit: &String) -> TradingPair {
     let parts: Vec<&str> = input_from_deribit.split('.').collect();
     let together = parts.get(1).unwrap_or(&"").to_string();
@@ -320,6 +317,7 @@ fn place_orders(update: &Vec<Value>,
                         },
                         "new" => {
                             // TODO: publish the trades at the correct topic '{deribit}_{pair}_trades, topic or something
+                            //  Also, in the client_msg function in ws.rs (since this places orders from clients)
                             let (_pair, _trades) = matching_engine.place_limit_order(
                                 trading_pair.clone(),
                                 price.clone(),
