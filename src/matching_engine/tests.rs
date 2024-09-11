@@ -12,19 +12,19 @@ pub mod tests {
         let mut engine = MatchingEngine::new();
         let pair = TradingPair::new("BTC".to_string(), "USDT".to_string());
         engine.add_new_market(pair.clone());
-        let trade_1 = engine.place_limit_order(pair.clone(),
+        let (_, trade_1) = engine.place_limit_order(pair.clone(),
                                                dec!(30_000.0),
                                                Order::new(BidOrAsk::Bid, 1.1, "trader_1".to_string(), "1".to_string())
         ).unwrap();
-        let trade_2 = engine.place_limit_order(pair.clone(),
+        let (_, trade_2) = engine.place_limit_order(pair.clone(),
                                                dec!(30_000.0),
                                                Order::new(BidOrAsk::Bid, 1.2, "trader_2".to_string(), "1".to_string())
         ).unwrap();
-        let trade_3 = engine.place_limit_order(pair.clone(),
+        let (_, trade_3) = engine.place_limit_order(pair.clone(),
                                                dec!(31_000.0),
                                                Order::new(BidOrAsk::Bid, 1.3, "trader_3".to_string(), "1".to_string())
         ).unwrap();
-        let trade_4 = engine.place_limit_order(pair.clone(),
+        let (_, trade_4) = engine.place_limit_order(pair.clone(),
                                                dec!(29_000.0),
                                                Order::new(BidOrAsk::Ask, 2.5, "trader_4".to_string(), "1".to_string())
         ).unwrap();

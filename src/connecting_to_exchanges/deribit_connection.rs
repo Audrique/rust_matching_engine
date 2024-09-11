@@ -273,8 +273,6 @@ pub async fn on_incoming_deribit_message(
     periodic_publish_task.abort();
 }
 
-// TODO: deal with the 'trades', the output of the place_limit_order
-//  publish it to the '{deribit}_{pair}_trades, topic or something
 fn place_orders(update: &Vec<Value>,
                 bid_or_ask: BidOrAsk,
                 trading_pair: TradingPair,
@@ -320,8 +318,9 @@ fn place_orders(update: &Vec<Value>,
                                 .unwrap()
                                 .insert(price, (volume, Instant::now()));}
                         },
-                        "new" => { // This case is correct
-                            let trades = matching_engine.place_limit_order(
+                        "new" => {
+                            // TODO: publish the trades at the correct topic '{deribit}_{pair}_trades, topic or something
+                            let (_pair, _trades) = matching_engine.place_limit_order(
                                 trading_pair.clone(),
                                 price.clone(),
                                 Order::new(bid_or_ask.clone(),

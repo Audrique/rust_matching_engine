@@ -63,12 +63,12 @@ impl MatchingEngine {
     pub fn place_limit_order(&mut self,
                              pair: TradingPair,
                              price: Decimal,
-                             order: Order) -> Result<Vec<Trade>, String> {
+                             order: Order) -> Result<(TradingPair, Vec<Trade>), String> {
         match self.orderbooks.get_mut(&pair) {
             Some(orderbook) => {
                 let trades = orderbook.add_limit_order(price, order);
                 // println!("Placed limit order at price level {}", price);
-                Ok(trades)
+                Ok((pair, trades))
             },
             None => {
                 Err(format!(
