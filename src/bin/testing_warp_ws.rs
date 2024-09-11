@@ -5,33 +5,15 @@ use std::fmt::format;
 use futures_util::{StreamExt, SinkExt};
 use serde::{Deserialize, Serialize};
 use reqwest::{Client, RequestBuilder};
+use rust_decimal_macros::dec;
 use serde_json::json;
 use tokio_tungstenite::connect_async;
-// use warp::ws::Message;
 use tokio_tungstenite::tungstenite::Message;
-
-#[derive(Deserialize, Serialize, Debug)]
-pub struct RegisterRequest {
-    user_id: usize,
-    topic: String,
-}
-
-#[derive(Deserialize)]
-pub struct TopicActionRequest {
-    topic: String,
-    client_id: String,
-}
+use warp::body::json;
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct RegisterResponse {
     url: String,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct Event {
-    topic: String,
-    user_id: Option<usize>,
-    message: String,
 }
 
 #[tokio::main]
@@ -76,6 +58,18 @@ async fn main() {
         ws_stream.send(Message::text("ping")).await.unwrap();
         println!("Message send to the server");
 
+        let add_limit_order_msg = json!({"action": "add_limit_order",
+            "trading_pair_base": "BTC",
+            "trading_pair_quote": "USDT",
+            "price": 58_000.0,
+            "side": "ask",
+            "volume": 20.2,
+            "trader_id": "testing_trader",
+            "order_id": "999"
+        });
+
+        ws_stream.send(Message::text(add_limit_order_msg.to_string())).await.unwrap();
+        println!("Sent the order request to the engine.");
         // Receive messages from the WebSocket server
         while let Some(message) = ws_stream.next().await {
             match message {
