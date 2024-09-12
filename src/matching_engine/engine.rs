@@ -59,7 +59,6 @@ impl MatchingEngine {
         println!("opening new orderbook for market {:?}", pair.to_string());
     }
 
-    // TODO: this function needs to return as a result the trades that happened in
     pub fn place_limit_order(&mut self,
                              pair: TradingPair,
                              price: Decimal,
@@ -79,7 +78,24 @@ impl MatchingEngine {
         }
     }
 
-    pub fn open_orders (&self, trader_id: String) -> HashMap<TradingPair, HashMap<Decimal, Vec<Order>>> {
+    pub fn place_market_order(&mut self,
+                             pair: TradingPair,
+                             order: &mut Order) -> Result<(TradingPair, Vec<Trade>), String> {
+        match self.orderbooks.get_mut(&pair) {
+            Some(orderbook) => {
+                let trades = orderbook.fill_market_order(order);
+                Ok((pair, trades))
+            },
+            None => {
+                Err(format!(
+                    "The orderbook for the given trading {} does not exist",
+                    pair.to_string()
+                ))
+            }
+        }
+    }
+
+    pub fn open_orders(&self, trader_id: String) -> HashMap<TradingPair, HashMap<Decimal, Vec<Order>>> {
         self.orderbooks
             .iter()
             .filter_map(|(trading_pair, orderbook)| {
