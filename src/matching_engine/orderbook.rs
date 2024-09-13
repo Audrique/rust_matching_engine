@@ -33,13 +33,18 @@ impl Trade {
 pub struct Orderbook {
     pub asks: BTreeMap<Decimal, Limit>,
     pub bids: BTreeMap<Decimal, Limit>,
+    pub taker_fee: f64,
+    pub maker_fee: f64,
+
 }
 
 impl Orderbook {
-    pub fn new() -> Orderbook {
+    pub fn new(taker_fee: f64, maker_fee: f64) -> Orderbook {
         Orderbook {
             asks: BTreeMap::new(),
             bids: BTreeMap::new(),
+            taker_fee,
+            maker_fee
         }
     }
 

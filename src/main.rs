@@ -31,6 +31,21 @@ pub struct Client {
     pub sender: Option<mpsc::UnboundedSender<std::result::Result<Message, warp::Error>>>,
 }
 
+pub struct TraderData {
+    pub position: f64,
+    pub trading_profit: f64,
+    pub holding_profit: f64,
+}
+impl TraderData {
+    pub fn new(position: f64, trading_profit: f64, holding_profit: f64) -> TraderData {
+        TraderData{
+            position,
+            trading_profit,
+            holding_profit,
+        }
+    }
+}
+
 async fn wait_for_server(rx: oneshot::Receiver<()>) {
     match rx.await {
         Ok(_) => println!("Server is ready, starting to process Deribit messages"),
@@ -42,8 +57,11 @@ async fn wait_for_server(rx: oneshot::Receiver<()>) {
 async fn main() {
     let trading_pair = TradingPair::new("BTC".to_string(), "USDT".to_string());
     let trading_pairs = vec![trading_pair.clone()];
+    // We put the trader data inside an arc mutex since we will add other exchanges later
+    // all on_incoming_{exchange}_message (currently only the deribit exchange)
+    let mut traders_data: Arc<TokioMutex<HashMap<String, TraderData>>> = Arc::new(TokioMutex::new(HashMap::new()));
     let mut engine = MatchingEngine::new();
-    engine.add_new_market(trading_pair.clone());
+    engine.add_new_market(trading_pair.clone(), 0.0, 0.0);
 
     let engine = Arc::new(TokioMutex::new(engine));
 

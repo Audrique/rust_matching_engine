@@ -11,7 +11,7 @@ pub mod tests {
     fn test_returning_of_trades() {
         let mut engine = MatchingEngine::new();
         let pair = TradingPair::new("BTC".to_string(), "USDT".to_string());
-        engine.add_new_market(pair.clone());
+        engine.add_new_market(pair.clone(), 0.0, 0.0);
         let (_, trade_1) = engine.place_limit_order(pair.clone(),
                                                dec!(30_000.0),
                                                Order::new(BidOrAsk::Bid, 1.1, "trader_1".to_string(), "1".to_string())
@@ -41,7 +41,7 @@ pub mod tests {
     fn test_trades() {
         let mut engine = MatchingEngine::new();
         let pair = TradingPair::new("BTC".to_string(), "USDT".to_string());
-        engine.add_new_market(pair.clone());
+        engine.add_new_market(pair.clone(),0.0, 0.0);
         let b1_order = Order::new(BidOrAsk::Bid, 5.5, "trader_1".to_string(), "1".to_string());
         let s1_order = Order::new(BidOrAsk::Ask, 8.5, "trader_2".to_string(), "-1".to_string());
         let _trade_1 = engine.place_limit_order(pair.clone(), dec!(30_000.0), b1_order).unwrap();
@@ -77,7 +77,7 @@ pub mod tests {
         let trader_id = String::from("trader_id_audrique");
         let mut engine = MatchingEngine::new();
         let pair = TradingPair::new("BTC".to_string(), "USDT".to_string());
-        engine.add_new_market(pair.clone());
+        engine.add_new_market(pair.clone(), 0.0, 0.0);
 
         let b1_order = Order::new(BidOrAsk::Bid, 5.5, trader_id.clone(), "-1".to_string());
         let b2_order = Order::new(BidOrAsk::Bid, 10.5, trader_id.clone(), "-1".to_string());
@@ -119,12 +119,12 @@ pub mod tests {
         let b1_order_to_cancel = Order::new(BidOrAsk::Bid, 5.5, trader_id.clone(), "1".to_string());
         let s1_order = Order::new(BidOrAsk::Ask, 9.5, trader_id.clone(), "2".to_string());
         let pair = TradingPair::new("BTC".to_string(), "USDT".to_string());
-        engine.add_new_market(pair.clone());
+        engine.add_new_market(pair.clone(), 0.0, 0.0);
 
         let b2_order = Order::new(BidOrAsk::Bid, 6.5, trader_id.clone(), "3".to_string());
         let s2_order = Order::new(BidOrAsk::Ask, 8.5, trader_id.clone(), "4".to_string());
         let eth_pair = TradingPair::new("ETH".to_string(), "USDT".to_string());
-        engine.add_new_market(eth_pair.clone());
+        engine.add_new_market(eth_pair.clone(), 0.0, 0.0);
 
         engine.place_limit_order(pair.clone(), dec!(30_000.0), b1_order).unwrap();
         engine.place_limit_order(pair.clone(), dec!(30_000.0), b1_order_to_cancel).unwrap();
@@ -166,12 +166,12 @@ pub mod tests {
         let b1_order_deribit = Order::new(BidOrAsk::Bid, 5.5, "deribit".to_string(), "-1".to_string());
         let s1_order = Order::new(BidOrAsk::Ask, 9.5, trader_id.clone(), "2".to_string());
         let pair = TradingPair::new("BTC".to_string(), "USDT".to_string());
-        engine.add_new_market(pair.clone());
+        engine.add_new_market(pair.clone(), 0.0, 0.0);
 
         let b2_order = Order::new(BidOrAsk::Bid, 6.5, trader_id.clone(), "3".to_string());
         let s2_order = Order::new(BidOrAsk::Ask, 8.5, trader_id.clone(), "4".to_string());
         let eth_pair = TradingPair::new("ETH".to_string(), "USDT".to_string());
-        engine.add_new_market(eth_pair.clone());
+        engine.add_new_market(eth_pair.clone(), 0.0, 0.0);
 
         engine.place_limit_order(pair.clone(), dec!(30_000.0), b1_order).unwrap();
         engine.place_limit_order(pair.clone(), dec!(30_000.0), b1_order_deribit).unwrap();
@@ -196,7 +196,7 @@ pub mod tests {
         let trader_id = String::from("trader_id_audrique");
         let mut engine = MatchingEngine::new();
         let pair = TradingPair::new("BTC".to_string(), "USDT".to_string());
-        engine.add_new_market(pair.clone());
+        engine.add_new_market(pair.clone(), 0.0, 0.0);
         let b1_order = Order::new(BidOrAsk::Bid, 5.5, trader_id.clone(), "0".to_string());
         engine.place_limit_order(pair.clone(), dec!(30_000.0), b1_order).unwrap();
 
@@ -210,7 +210,7 @@ pub mod tests {
     }
     #[test]
     fn check_open_orders() {
-        let mut orderbook = Orderbook::new();
+        let mut orderbook = Orderbook::new(0.0, 0.0);
         let trader_id = "trader_1".to_string();
 
         let buy_limit_order_a = Order::new(BidOrAsk::Bid, 100.0, trader_id.clone(), "0".to_string());
@@ -247,7 +247,7 @@ pub mod tests {
 
     #[test]
     fn cancel_order_from_orderbook() {
-        let mut orderbook = Orderbook::new();
+        let mut orderbook = Orderbook::new(0.0, 0.0);
         orderbook.add_limit_order(dec!(500), Order::new(BidOrAsk::Ask, 10.0, "trader1".to_string(), "0".to_string()));
         orderbook.add_limit_order(dec!(100), Order::new(BidOrAsk::Ask, 10.0, "trader2".to_string(), "1".to_string()));
         assert_eq!(orderbook.asks.len(), 2);
@@ -256,7 +256,7 @@ pub mod tests {
     }
     #[test]
     fn remove_websocket_volume_from_orderbook() {
-        let mut orderbook = Orderbook::new();
+        let mut orderbook = Orderbook::new(0.0, 0.0);
         orderbook.add_limit_order(dec!(500), Order::new(BidOrAsk::Ask, 10.0, "trader1".to_string(), "0".to_string()));
         orderbook.add_limit_order(dec!(100), Order::new(BidOrAsk::Ask, 10.0, "trader2".to_string(), "1".to_string()));
         orderbook.add_limit_order(dec!(200), Order::new(BidOrAsk::Ask, 10.0, "deribit".to_string(), "-1".to_string()));
@@ -272,7 +272,7 @@ pub mod tests {
     }
     #[test]
     fn orderbook_fill_market_order_ask() {
-        let mut orderbook = Orderbook::new();
+        let mut orderbook = Orderbook::new(0.0, 0.0);
         orderbook.add_limit_order(dec!(500), Order::new(BidOrAsk::Ask, 10.0, "trader1".to_string(), "0".to_string()));
         orderbook.add_limit_order(dec!(100), Order::new(BidOrAsk::Ask, 10.0, "trader2".to_string(), "1".to_string()));
         orderbook.add_limit_order(dec!(200), Order::new(BidOrAsk::Ask, 10.0, "trader1".to_string(), "2".to_string()));

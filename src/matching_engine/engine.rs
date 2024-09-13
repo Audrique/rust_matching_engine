@@ -54,8 +54,8 @@ impl MatchingEngine {
             orderbooks: HashMap::new(),
         }
     }
-    pub fn add_new_market(&mut self, pair: TradingPair) {
-        self.orderbooks.insert(pair.clone(), Orderbook::new());
+    pub fn add_new_market(&mut self, pair: TradingPair, taker_fee: f64, maker_fee: f64) {
+        self.orderbooks.insert(pair.clone(), Orderbook::new(taker_fee, maker_fee));
         println!("opening new orderbook for market {:?}", pair.to_string());
     }
 
