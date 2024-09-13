@@ -17,7 +17,8 @@ use reqwest::Client;
 use serde::ser::SerializeTuple;
 use crate::matching_engine::{engine::{MatchingEngine, TradingPair},
                              orderbook::{Order, BidOrAsk}};
-use crate::warp_websocket::handler::{Event, publish_handler};
+use crate::warp_websocket::handler::{Event};
+use crate::connecting_to_exchanges::for_all_exchanges::{TraderData, update_trader_data};
 
 fn make_trading_pair_type(input_from_deribit: &String) -> TradingPair {
     let parts: Vec<&str> = input_from_deribit.split('.').collect();
@@ -169,6 +170,7 @@ pub async fn on_incoming_deribit_message(
     ws_stream_ref: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
     matching_engine: Arc<TokioMutex<MatchingEngine>>,
     trading_pairs: Vec<TradingPair>,
+    traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>,
 ) {
     let previous_best_bids: Arc<TokioMutex<HashMap<TradingPair, Decimal>>> = Arc::new(TokioMutex::new(HashMap::new()));
     let previous_best_asks: Arc<TokioMutex<HashMap<TradingPair, Decimal>>> = Arc::new(TokioMutex::new(HashMap::new()));
@@ -238,10 +240,19 @@ pub async fn on_incoming_deribit_message(
                     let matching_engine = Arc::clone(&matching_engine);
                     let publish_client = Arc::clone(&publish_client);
                     let on_hold_changes = Arc::clone(&on_hold_changes);
+                    let traders_data_cloned = Arc::clone(&traders_data);
                     // Immediately offload the message processing to another function/task.
                     let msg = data.clone();
                     tokio::spawn(async move {
-                        if let Err(e) = process_message(msg, matching_engine, previous_best_bids, previous_best_asks, publish_client, on_hold_changes).await {
+                        if let Err(e) = process_message(
+                            msg,
+                            matching_engine,
+                            previous_best_bids,
+                            previous_best_asks,
+                            publish_client,
+                            on_hold_changes,
+                            traders_data_cloned
+                        ).await {
                             eprintln!("Error processing message: {:?}", e);
                         }
                     });
@@ -270,12 +281,16 @@ pub async fn on_incoming_deribit_message(
     periodic_publish_task.abort();
 }
 
-fn place_orders(update: &Vec<Value>,
+
+// TODO: put the arc mutex in here instead of the engine so we can have
+//  the least amount of locking we can
+async fn place_orders(update: &Vec<Value>,
                 bid_or_ask: BidOrAsk,
                 trading_pair: TradingPair,
                 matching_engine: &mut MatchingEngine,
                 on_hold_changes: &mut HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, (f64, Instant)>>>,
                 time_until_forget_on_hold: Duration,
+                traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>
 ) {
     for price_level in update {
         if let Some(Value::String(type_of_update)) = &price_level.get(0) {
@@ -318,7 +333,7 @@ fn place_orders(update: &Vec<Value>,
                         "new" => {
                             // TODO: publish the trades at the correct topic '{deribit}_{pair}_trades, topic or something
                             //  Also, in the client_msg function in ws.rs (since this places orders from clients)
-                            let (_pair, _trades) = matching_engine.place_limit_order(
+                            let (pair, trades) = matching_engine.place_limit_order(
                                 trading_pair.clone(),
                                 price.clone(),
                                 Order::new(bid_or_ask.clone(),
@@ -326,6 +341,7 @@ fn place_orders(update: &Vec<Value>,
                                            "deribit".to_string(),
                                            "-1".to_string())
                             ).unwrap();
+                            update_trader_data(pair, trades, traders_data.clone()).await;
 
                             let volume_on_hold = on_hold_changes.
                                 get_mut(&trading_pair)
@@ -404,6 +420,7 @@ async fn process_message(
     previous_best_asks: Arc<TokioMutex<HashMap<TradingPair, Decimal>>>,
     publish_client: Arc<Client>,
     on_hold_changes: Arc<TokioMutex<HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, (f64, Instant)>>>>>,
+    traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let (trading_pair, data) = extract_trading_pair_and_data(&msg)?;
@@ -416,6 +433,7 @@ async fn process_message(
         previous_best_asks,
         publish_client.clone(),
         on_hold_changes.clone(),
+        traders_data.clone()
     ).await?;
     process_order_updates(
         &data,
@@ -426,6 +444,7 @@ async fn process_message(
         previous_best_bids,
         publish_client,
         on_hold_changes,
+        traders_data
     ).await?;
     Ok(())
 }
@@ -449,6 +468,7 @@ async fn process_order_updates(
     previous_best_prices: Arc<TokioMutex<HashMap<TradingPair, Decimal>>>,
     publish_client: Arc<Client>,
     on_hold_changes: Arc<TokioMutex<HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, (f64, Instant)>>>>>,
+    traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     // TODO? maybe change this such that the updates is still of type Value and we can access the elements by the 'key'
     if let Some(Value::Array(updates)) = data.get(side) {
@@ -459,6 +479,7 @@ async fn process_order_updates(
                 trading_pair,
                 matching_engine,
                 on_hold_changes,
+                traders_data
             ).await?;
 
             check_and_publish_price_change(
@@ -479,10 +500,17 @@ async fn update_orders_and_get_best_price(
     trading_pair: &TradingPair,
     matching_engine: Arc<TokioMutex<MatchingEngine>>,
     on_hold_changes: Arc<TokioMutex<HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, (f64, Instant)>>>>>,
+    traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>,
 ) -> Result<Decimal, Box<dyn Error + Send + Sync>> {
     let mut engine = matching_engine.lock().await;
     let mut on_hold_changes_ = on_hold_changes.lock().await;
-    place_orders(updates, bid_or_ask.clone(), trading_pair.clone(), &mut engine, &mut on_hold_changes_, Duration::from_secs(2));
+    place_orders(updates,
+                 bid_or_ask.clone(),
+                 trading_pair.clone(),
+                 &mut engine,
+                 &mut on_hold_changes_,
+                 Duration::from_secs(2),
+                 traders_data).await;
 
     let orderbook = engine.orderbooks.get(trading_pair).ok_or("Orderbook not found")?;
     let (best_price, _) = match bid_or_ask {

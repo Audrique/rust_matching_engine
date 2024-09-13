@@ -6,12 +6,15 @@ use warp::Filter;
 use crate::warp_websocket::{handler, handler::TopicActionRequest};
 use crate::{Clients};
 use crate::matching_engine::engine::MatchingEngine;
+use crate::connecting_to_exchanges::for_all_exchanges::TraderData;
 
 fn with_clients(clients: Clients) -> impl Filter<Extract = (Clients,), Error = Infallible> + Clone {
     warp::any().map(move || clients.clone())
 }
 
-pub async fn start_server(tx: oneshot::Sender<()>, matching_engine: Arc<TokioMutex<MatchingEngine>>) {
+pub async fn start_server(tx: oneshot::Sender<()>,
+                          matching_engine: Arc<TokioMutex<MatchingEngine>>,
+                          traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>) {
     let clients: Clients = Arc::new(RwLock::new(HashMap::new()));
     let health_route = warp::path!("health").and_then(handler::health_handler);
 
@@ -38,6 +41,7 @@ pub async fn start_server(tx: oneshot::Sender<()>, matching_engine: Arc<TokioMut
         .and(warp::path::param())
         .and(with_clients(clients.clone()))
         .and(warp::any().map(move || matching_engine.clone()))
+        .and(warp::any().map(move || traders_data.clone()))
         .and_then(handler::ws_handler);
 
     let clients_for_add = clients.clone();

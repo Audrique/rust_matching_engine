@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
 use crate::{Client, Clients};
@@ -11,6 +12,7 @@ use serde_json::{from_str, Value};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use warp::ws::{Message, WebSocket};
+use crate::connecting_to_exchanges::for_all_exchanges::{TraderData, update_trader_data};
 use crate::matching_engine::engine::{MatchingEngine, TradingPair};
 use crate::matching_engine::orderbook::{BidOrAsk, Trade, Order};
 
@@ -19,7 +21,13 @@ pub struct TopicsRequest {
     topics: Vec<String>,
 }
 
-pub async fn client_connection(ws: WebSocket, id: String, clients: Clients, mut client: Client, matching_engine: Arc<TokioMutex<MatchingEngine>>) {
+pub async fn client_connection(ws: WebSocket,
+                               id: String,
+                               clients: Clients,
+                               mut client: Client,
+                               matching_engine: Arc<TokioMutex<MatchingEngine>>,
+                               traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>
+) {
     let (client_ws_sender, mut client_ws_rcv) = ws.split();
     let (client_sender, client_rcv) = mpsc::unbounded_channel();
 
@@ -43,7 +51,7 @@ pub async fn client_connection(ws: WebSocket, id: String, clients: Clients, mut 
                 break;
             }
         };
-        client_msg(&id, msg, &clients, matching_engine.clone()).await;
+        client_msg(&id, msg, &clients, matching_engine.clone(), traders_data.clone()).await;
     }
 
     // Only get here when we get an error and then remove the id
@@ -51,7 +59,12 @@ pub async fn client_connection(ws: WebSocket, id: String, clients: Clients, mut 
     println!("{} disconnected", id);
 }
 
-async fn client_msg(id: &str, msg: Message, clients: &Clients, matching_engine: Arc<TokioMutex<MatchingEngine>>) {
+async fn client_msg(id: &str,
+                    msg: Message,
+                    clients: &Clients,
+                    matching_engine: Arc<TokioMutex<MatchingEngine>>,
+                    traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>
+) {
     println!("received message from {}: {:?}", id, msg);
     let message = match msg.to_str() {
         Ok(v) => v,
@@ -81,7 +94,9 @@ async fn client_msg(id: &str, msg: Message, clients: &Clients, matching_engine: 
             "add_limit_order" => {
                 let (trading_pair, price, order_to_place) = prepare_limit_order(data);
                 let mut engine = matching_engine.lock().await;
-                let (_pair, trades) = engine.place_limit_order(trading_pair, price, order_to_place).unwrap();
+                let (pair, trades) = engine.place_limit_order(trading_pair, price, order_to_place).unwrap();
+                drop(engine); // Drop the lock on the engine as soon as possible
+                update_trader_data(pair, trades.clone(), traders_data).await;
                 // TODO: publish these trades to the correct topic
                 println!("The trades that occurred after placing an order from the client trader: {:?}", trades);
             },
@@ -93,7 +108,9 @@ async fn client_msg(id: &str, msg: Message, clients: &Clients, matching_engine: 
             "market_order" => {
                 let (trading_pair, mut order_to_place) = prepare_market_order(data);
                 let mut engine = matching_engine.lock().await;
-                let (_pair, trades) = engine.place_market_order(trading_pair, &mut order_to_place).unwrap();
+                let (pair, trades) = engine.place_market_order(trading_pair, &mut order_to_place).unwrap();
+                drop(engine);
+                update_trader_data(pair, trades.clone(), traders_data).await;
                 // TODO: publish these trades to the correct topic
                 println!("The trades that occurred after placing an order from the client trader: {:?}", trades);
             },
