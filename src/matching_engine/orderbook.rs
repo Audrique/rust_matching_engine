@@ -15,16 +15,25 @@ pub struct Trade {
     pub trader_id_maker: String,
     pub volume: f64,
     pub price: Decimal,
-    timestamp: Instant
+    timestamp: Instant,
+    pub taker_fee: f64,
+    pub maker_fee: f64,
 }
 impl Trade {
-    pub fn new(trader_id_taker: String, trader_id_maker: String, volume: f64, price: Decimal, timestamp: Instant) -> Trade {
+    pub fn new(trader_id_taker: String,
+               trader_id_maker: String,
+               volume: f64, price: Decimal,
+               timestamp: Instant,
+               taker_fee: f64,
+               maker_fee: f64) -> Trade {
         Trade {
             trader_id_taker,
             trader_id_maker,
             volume,
             price,
             timestamp,
+            taker_fee,
+            maker_fee
         }
     }
 }
@@ -50,6 +59,8 @@ impl Orderbook {
 
 
     pub fn fill_market_order(&mut self, market_order: &mut Order) -> Vec<Trade> {
+        let taker_fee = self.taker_fee.clone();
+        let maker_fee = self.maker_fee.clone();
 
         let limits = match market_order.bid_or_ask {
             BidOrAsk::Bid => {self.ask_limits()},
@@ -60,7 +71,7 @@ impl Orderbook {
         let mut happened_trades: Vec<Trade> = Vec::new();
 
         for limit in limits {
-            let trades = limit.fill_order(market_order, limit.price.clone());
+            let trades = limit.fill_order(market_order, limit.price.clone(), taker_fee, maker_fee);
             happened_trades.extend(trades);
             if limit.orders.len() == 0 {
             prices_to_remove.push(limit.price);
@@ -79,6 +90,8 @@ impl Orderbook {
     }
 
     pub fn fill_limit_order(&mut self, limit_order: &mut Order, price: Decimal) -> (f64, Vec<Trade>) {
+        let taker_fee = self.taker_fee.clone();
+        let maker_fee = self.maker_fee.clone();
 
         let limits: Vec<&mut Limit> = match limit_order.bid_or_ask {
             BidOrAsk::Bid => self.asks
@@ -94,7 +107,7 @@ impl Orderbook {
         let mut prices_to_remove = Vec::new();
         let mut happened_trades: Vec<Trade> = Vec::new();
         for limit in limits {
-            let trades_at_limit = limit.fill_order(limit_order, limit.price.clone());
+            let trades_at_limit = limit.fill_order(limit_order, limit.price.clone(), taker_fee, maker_fee);
             happened_trades.extend(trades_at_limit);
             if limit.orders.len() == 0 {
                 prices_to_remove.push(limit.price);
@@ -275,7 +288,7 @@ impl Limit {
 
     // At this moment self trades are avoided by just ignoring each trader's
     // other trades. Change this to not letting you place the order in the first place?
-    pub fn fill_order(&mut self, market_order: &mut Order, price: Decimal) -> Vec<Trade> {
+    pub fn fill_order(&mut self, market_order: &mut Order, price: Decimal, taker_fee: f64, maker_fee: f64) -> Vec<Trade> {
         let mut i = 0;
         let mut happened_trades: Vec<Trade> = Vec::new();
 
@@ -292,7 +305,10 @@ impl Limit {
                                 limit_order.trader_id.clone(),
                                 limit_order.size.clone(),
                                 price.clone(),
-                                Instant::now())
+                                Instant::now(),
+                                taker_fee,
+                                maker_fee
+                            )
                         );
                         limit_order.size = 0.0;
                         self.orders.remove(i);
@@ -307,7 +323,9 @@ impl Limit {
                                 limit_order.trader_id.clone(),
                                 market_order.size.clone(),
                                 price.clone(),
-                                Instant::now()
+                                Instant::now(),
+                                taker_fee,
+                                maker_fee
                             )
                         );
                         market_order.size = 0.0;

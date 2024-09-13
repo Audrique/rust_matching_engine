@@ -309,7 +309,7 @@ pub mod tests {
 
         let mut market_sell_order = Order::new(BidOrAsk::Ask, 99.0, "trader_2".to_string(), "1".to_string());
 
-        let trades = limit.fill_order(&mut market_sell_order, price.clone());
+        let trades = limit.fill_order(&mut market_sell_order, price.clone(), 0.0, 0.0);
         assert_eq!(trades[0].volume, 99.0);
         assert_eq!(trades[0].trader_id_maker, String::from("trader_audrique"));
         assert_eq!(market_sell_order.is_filled(), true);
@@ -349,7 +349,7 @@ pub mod tests {
 
         let mut market_sell_order = Order::new(BidOrAsk::Ask, 100.0, "trader1".to_string(), "2".to_string());
 
-        let trades = limit.fill_order(&mut market_sell_order, price.clone());
+        let trades = limit.fill_order(&mut market_sell_order, price.clone(), 0.0, 0.0);
 
         assert_eq!(market_sell_order.is_filled(), true);
         assert_eq!(limit.orders.get(0).unwrap().is_filled(), false);
