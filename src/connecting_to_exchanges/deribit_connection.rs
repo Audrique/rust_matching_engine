@@ -20,6 +20,9 @@ use crate::matching_engine::{engine::{MatchingEngine, TradingPair},
 use crate::warp_websocket::handler::{Event};
 use crate::connecting_to_exchanges::for_all_exchanges::{TraderData, update_trader_data};
 
+// TODO: remove the Box<> in the Results as much as we can as it is slower (uses the heap)
+//  Just replace it with the correct error type.
+
 fn make_trading_pair_type(input_from_deribit: &String) -> TradingPair {
     let parts: Vec<&str> = input_from_deribit.split('.').collect();
     let together = parts.get(1).unwrap_or(&"").to_string();
@@ -183,6 +186,7 @@ pub async fn on_incoming_deribit_message(
     let periodic_publish_task = {
         let matching_engine = Arc::clone(&matching_engine);
         let publish_client = Arc::clone(&publish_client);
+        let traders_data_cloned = Arc::clone(&traders_data);
         tokio::spawn(async move {
             loop {
                 // Use this to automatically close the lock
@@ -201,8 +205,13 @@ pub async fn on_incoming_deribit_message(
                             .collect();
                         let topic = format!("{}_deribit_top_10_asks_bids_periodically", t_pair.clone().to_string());
                         let message = format!("Top 10 asks: {:?}; Top 10 bids: {:?}", top_10_asks, top_10_bids);
-                        // println!("The message: {:?}", message);
-                        publish_message(message.clone(), topic, &publish_client).await.unwrap();
+                        publish_message(message, topic, &publish_client).await.unwrap();
+
+                        // Also publish the traders data
+                        let topic2 = "traders_data_periodically".to_string();
+                        let traders_data2 = traders_data_cloned.lock().await;
+                        let message2 = format!("{:?}", traders_data2.clone());
+                        publish_message(message2, topic2, &publish_client).await.unwrap();
                     }
                 };
                 // Wait for 250 ms
@@ -542,6 +551,5 @@ async fn check_and_publish_price_change(
         publish_message(message.clone(), topic, &publish_client).await?;
         println!("published {}", message);
     }
-
     Ok(())
 }

@@ -7,6 +7,7 @@ use std::sync::Arc;
 // The holding profit we update manually, since the midprice
 // has to be updated more than just when a trade happens but TraderData will only get updated on trades
 // Update the holding profit when sending the data to the user interface (each 250ms at the moment)
+#[derive(Debug, Clone)]
 pub struct TraderData {
     pub positions: HashMap<TradingPair, f64>,
     pub trading_profit: f64,
