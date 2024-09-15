@@ -2,18 +2,50 @@
 #![allow(unused_imports)]
 
 use std::fmt::format;
+use std::str::FromStr;
 use futures_util::{StreamExt, SinkExt};
 use serde::{Deserialize, Serialize};
 use reqwest::{Client, RequestBuilder};
+use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
-use serde_json::json;
-use tokio_tungstenite::connect_async;
+use serde_json::{json, Value};
+use tokio::net::TcpStream;
+use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tokio_tungstenite::tungstenite::Message;
 use warp::body::json;
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct RegisterResponse {
     url: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct BestBidOrAskData {
+    message: String,
+    topic: String,
+    user_id: u32,
+}
+
+pub async fn place_limit_order(trading_pair_base: &str,
+                         trading_pair_quote: &str,
+                         price: f64,
+                         side: &str,
+                         volume: f64,
+                         trader_id: &str,
+                         order_id: &str,
+                         ws_stream_ref: &mut WebSocketStream<MaybeTlsStream<TcpStream>>
+) {
+    let add_limit_order_msg = json!({"action": "add_limit_order",
+            "trading_pair_base": trading_pair_base,
+            "trading_pair_quote": trading_pair_quote,
+            "price": price,
+            "side": side,
+            "volume": volume,
+            "trader_id": trader_id,
+            "order_id": order_id
+        });
+    ws_stream_ref.send(Message::text(add_limit_order_msg.to_string())).await.unwrap();
+    println!("Sent the order request to the engine.");
 }
 
 #[tokio::main]
@@ -58,23 +90,49 @@ async fn main() {
         ws_stream.send(Message::text("ping")).await.unwrap();
         println!("Message send to the server");
 
-        let add_limit_order_msg = json!({"action": "add_limit_order",
-            "trading_pair_base": "BTC",
-            "trading_pair_quote": "USDT",
-            "price": 58_000.0,
-            "side": "ask",
-            "volume": 20.2,
-            "trader_id": "testing_trader",
-            "order_id": "999"
-        });
-
-        ws_stream.send(Message::text(add_limit_order_msg.to_string())).await.unwrap();
-        println!("Sent the order request to the engine.");
         // Receive messages from the WebSocket server
         while let Some(message) = ws_stream.next().await {
             match message {
-                Ok(msg) => println!("Received: {:?}", msg),
-                Err(e) => println!("Error: {:?}", e),
+                Ok(msg) => {
+                    match msg {
+                        Message::Text(text) => {
+                            match serde_json::from_str::<BestBidOrAskData>(&text) {
+                                Ok(parsed_msg) => {
+                                    // println!("Parsed message: {:?}", parsed_msg);
+                                    if parsed_msg.topic == "BTC_USDT_deribit_best_bid_change" {
+                                        let parts = parsed_msg.message.split(" ").collect::<Vec<&str>>();
+                                        let new_best_price = f64::from_str(parts[2]).unwrap();
+                                        let side = parts[1].trim_end_matches(':');
+
+                                        let order_price = match side {
+                                            "bid" => {new_best_price + 30.0},
+                                            "ask" => {new_best_price - 30.0},
+                                            _ => -1.0,
+                                        };
+                                        // Now the order_id is always the same, just ignore it for now
+                                        place_limit_order("BTC",
+                                                          "USDT",
+                                                          order_price,
+                                                          side,
+                                                          0.002,
+                                                          "testing_trader",
+                                                          "33",
+                                                          &mut ws_stream
+
+                                        ).await;
+                                    }
+
+                                },
+                                Err(e) => {println!("Failed to parse message: {:?}", e)},
+                            }
+                        }
+                        _ => {
+                            println!("Received a different type of message than expected: {:?}", msg);
+                        }
+                    }
+                },
+                Err(e) => {println!("Error: {:?}", e)
+                },
             }
         }
     } else {

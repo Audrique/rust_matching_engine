@@ -210,7 +210,7 @@ pub async fn on_incoming_deribit_message(
                         // Also publish the traders data
                         let topic2 = "traders_data_periodically".to_string();
                         let traders_data2 = traders_data_cloned.lock().await;
-                        let message2 = format!("{:?}", traders_data2.clone());
+                        let message2 = serde_json::to_string(&*traders_data2).unwrap();
                         publish_message(message2, topic2, &publish_client).await.unwrap();
                     }
                 };
@@ -347,7 +347,7 @@ async fn place_orders(update: &Vec<Value>,
                                 price.clone(),
                                 Order::new(bid_or_ask.clone(),
                                            volume,
-                                           "deribit".to_string(),
+                                           "deribit-exchange".to_string(),
                                            "-1".to_string())
                             ).unwrap();
                             update_trader_data(pair, trades, traders_data.clone()).await;

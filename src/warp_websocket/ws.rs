@@ -65,12 +65,12 @@ async fn client_msg(id: &str,
                     matching_engine: Arc<TokioMutex<MatchingEngine>>,
                     traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>
 ) {
-    println!("received message from {}: {:?}", id, msg);
+    // println!("received message from {}: {:?}", id, msg);
     let message = match msg.to_str() {
         Ok(v) => v,
         Err(_) => return
     };
-    println!("{:?}", message);
+    // println!("{:?}", message);
 
     if message == "ping" || message == "ping\n" {
         println!("Received ping from {}", id);
@@ -88,7 +88,7 @@ async fn client_msg(id: &str,
         Err(_) => {eprintln!("Error parsing message in client_msg"); return}
     };
     if let Some(action) = data.get("action"){
-        println!("The parsed data: {:?}", data);
+        // println!("The parsed data: {:?}", data);
         let str_action = action.as_str().unwrap();
         match str_action {
             "add_limit_order" => {
@@ -98,7 +98,7 @@ async fn client_msg(id: &str,
                 drop(engine); // Drop the lock on the engine as soon as possible
                 update_trader_data(pair, trades.clone(), traders_data).await;
                 // TODO: publish these trades to the correct topic
-                println!("The trades that occurred after placing an order from the client trader: {:?}", trades);
+                // println!("The trades that occurred after placing an order from the client trader: {:?}", trades);
             },
             "cancel_limit_order" => {
                 let (trading_pair,side, price, order_id) = prepare_cancel_order(data);
@@ -114,7 +114,7 @@ async fn client_msg(id: &str,
                 // TODO: publish these trades to the correct topic
                 println!("The trades that occurred after placing an order from the client trader: {:?}", trades);
             },
-            _ => {panic!("Client request was not a placement or cancelation of a limit order, nor a market order.")}
+            _ => {panic!("Client request was not a placement or cancellation of a limit order, nor a market order.")}
         }
         return;
     }
@@ -147,10 +147,12 @@ fn prepare_limit_order(data: Value) -> (TradingPair, Decimal, Order) {
         Some("ask") => {BidOrAsk::Ask},
         _ => {panic!("Unexpected value for side received from the client!");} // Handle this better potentially?
     };
+    let trader_id = data["trader_id"].as_str().expect("Missing trader_id").to_string();
+    let order_id = data["order_id"].as_str().expect("Missing order_id").to_string();
     let order_to_place =  Order::new(bid_or_ask,
                                      data["volume"].as_f64().unwrap(),
-                                     data["trader_id"].to_string(),
-                                     data["order_id"].to_string()
+                                     trader_id,
+                                     order_id
     );
     let trading_pair_base = data["trading_pair_base"].as_str().ok_or("Missing trading_pair_base").unwrap();
     let trading_pair_quote = data["trading_pair_quote"].as_str().ok_or("Missing trading_pair_quote").unwrap();
@@ -180,10 +182,12 @@ fn prepare_market_order(data: Value) -> (TradingPair, Order) {
         Some("ask") => {BidOrAsk::Ask},
         _ => {panic!("Unexpected value for side received from the client!");} // Handle this better potentially?
     };
+    let trader_id = data["trader_id"].as_str().expect("Missing trader_id").to_string();
+    let order_id = data["order_id"].as_str().expect("Missing order_id").to_string();
     let order_to_place =  Order::new(bid_or_ask,
                                      data["volume"].as_f64().unwrap(),
-                                     data["trader_id"].to_string(),
-                                     data["order_id"].to_string()
+                                     trader_id,
+                                     order_id
     );
     let trading_pair_base = data["trading_pair_base"].as_str().ok_or("Missing trading_pair_base").unwrap();
     let trading_pair_quote = data["trading_pair_quote"].as_str().ok_or("Missing trading_pair_quote").unwrap();

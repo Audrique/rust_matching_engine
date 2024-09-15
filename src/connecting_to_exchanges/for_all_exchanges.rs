@@ -1,15 +1,17 @@
 use std::collections::HashMap;
+use std::fmt::format;
 use crate::matching_engine::engine::TradingPair;
 use crate::matching_engine::orderbook::Trade;
 use tokio::sync::Mutex as TokioMutex;
 use std::sync::Arc;
+use serde::{Deserialize, Serialize};
 
 // The holding profit we update manually, since the midprice
 // has to be updated more than just when a trade happens but TraderData will only get updated on trades
 // Update the holding profit when sending the data to the user interface (each 250ms at the moment)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TraderData {
-    pub positions: HashMap<TradingPair, f64>,
+    pub positions: HashMap<String, f64>,
     pub trading_profit: f64,
 }
 impl TraderData {
@@ -19,7 +21,11 @@ impl TraderData {
             trading_profit,
         }
     }
+    pub fn to_string(&self) -> String {
+        serde_json::to_string(self).unwrap()
+    }
 }
+
 
 pub async fn update_trader_data(trading_pair: TradingPair,
                                 trades: Vec<Trade>,
@@ -33,12 +39,12 @@ pub async fn update_trader_data(trading_pair: TradingPair,
 
         // Update taker's data
         let taker_data = traders_data.entry(taker_id.clone()).or_insert_with(|| TraderData::new(0.0));
-        *taker_data.positions.entry(trading_pair.clone()).or_insert(0.0) += trade.volume;
+        *taker_data.positions.entry(trading_pair.clone().to_string()).or_insert(0.0) += trade.volume;
         taker_data.trading_profit -= trade_value + trade.taker_fee;
 
         // Update maker's data
         let maker_data = traders_data.entry(maker_id.clone()).or_insert_with(|| TraderData::new(0.0));
-        *maker_data.positions.entry(trading_pair.clone()).or_insert(0.0) -= trade.volume;
+        *maker_data.positions.entry(trading_pair.clone().to_string()).or_insert(0.0) -= trade.volume;
         maker_data.trading_profit += trade_value - trade.maker_fee;
     }
 }
