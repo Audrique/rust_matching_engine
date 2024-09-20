@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
-
 use std::fmt::format;
 use std::str::FromStr;
 use futures_util::{StreamExt, SinkExt};
@@ -26,14 +25,20 @@ struct BestBidOrAskData {
     user_id: u32,
 }
 
+#[derive(Debug, Deserialize)]
+struct MessageContent {
+    price: String,
+    side: String,
+}
+
 pub async fn place_limit_order(trading_pair_base: &str,
-                         trading_pair_quote: &str,
-                         price: f64,
-                         side: &str,
-                         volume: f64,
-                         trader_id: &str,
-                         order_id: &str,
-                         ws_stream_ref: &mut WebSocketStream<MaybeTlsStream<TcpStream>>
+                               trading_pair_quote: &str,
+                               price: f64,
+                               side: &str,
+                               volume: f64,
+                               trader_id: &str,
+                               order_id: &str,
+                               ws_stream_ref: &mut WebSocketStream<MaybeTlsStream<TcpStream>>
 ) {
     let add_limit_order_msg = json!({"action": "add_limit_order",
             "trading_pair_base": trading_pair_base,
@@ -98,32 +103,34 @@ async fn main() {
                         Message::Text(text) => {
                             match serde_json::from_str::<BestBidOrAskData>(&text) {
                                 Ok(parsed_msg) => {
-                                    // println!("Parsed message: {:?}", parsed_msg);
                                     if parsed_msg.topic == "BTC_USDT_deribit_best_bid_change" {
-                                        let parts = parsed_msg.message.split(" ").collect::<Vec<&str>>();
-                                        let new_best_price = f64::from_str(parts[2]).unwrap();
-                                        let side = parts[1].trim_end_matches(':');
+                                        match serde_json::from_str::<MessageContent>(&parsed_msg.message) {
+                                            Ok(content) => {
+                                                println!("Parsed message: {:?}", &content);
+                                                let new_best_price = f64::from_str(&content.price).unwrap();
+                                                let side = &content.side;
 
-                                        let order_price = match side {
-                                            "bid" => {new_best_price + 30.0},
-                                            "ask" => {new_best_price - 30.0},
-                                            _ => -1.0,
-                                        };
-                                        // Now the order_id is always the same, just ignore it for now
-                                        place_limit_order("BTC",
-                                                          "USDT",
-                                                          order_price,
-                                                          side,
-                                                          0.002,
-                                                          "testing_trader",
-                                                          "33",
-                                                          &mut ws_stream
+                                                let order_price = match side.as_str() {
+                                                    "bid" => new_best_price + 30.0,
+                                                    "ask" => new_best_price - 30.0,
+                                                    _ => -1.0,
+                                                };
 
-                                        ).await;
+                                                place_limit_order("BTC",
+                                                                  "USDT",
+                                                                  order_price,
+                                                                  side,
+                                                                  0.002,
+                                                                  "testing_trader",
+                                                                  "33",
+                                                                  &mut ws_stream
+                                                ).await;
+                                            },
+                                            Err(e) => println!("Failed to parse message content: {:?}", e),
+                                        }
                                     }
-
                                 },
-                                Err(e) => {println!("Failed to parse message: {:?}", e)},
+                                Err(e) => println!("Failed to parse message: {:?}", e),
                             }
                         }
                         _ => {
@@ -131,8 +138,7 @@ async fn main() {
                         }
                     }
                 },
-                Err(e) => {println!("Error: {:?}", e)
-                },
+                Err(e) => println!("Error: {:?}", e),
             }
         }
     } else {

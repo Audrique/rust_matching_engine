@@ -22,4 +22,5 @@ tokio-stream = "0.1.15"
 reqwest = { version = "0.12.7", features = ["json"] }
 
 # dependencies for TDengine database
-taos-query = "0.12.4"
+taos = "0.12.3"#this depends on parse_duration,
+#however, it seems to not bother us since we do not have any users or anything

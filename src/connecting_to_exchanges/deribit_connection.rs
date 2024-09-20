@@ -547,7 +547,10 @@ async fn check_and_publish_price_change(
         drop(previous_best);
 
         let topic = format!("{}_deribit_best_{}_change", trading_pair.clone().to_string(), side.trim_end_matches('s'));
-        let message = format!("Best {}: {}", side.trim_end_matches('s'), new_price);
+        let message = json!({
+            "side": side.trim_end_matches('s'),
+            "price": new_price
+        }).to_string();
         publish_message(message.clone(), topic, &publish_client).await?;
         println!("published {}", message);
     }
