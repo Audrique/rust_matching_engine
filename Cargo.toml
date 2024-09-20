@@ -16,23 +16,16 @@ name = "main"
 path = "src/main.rs"
 
 [dependencies]
-
-# dependecies for the local orderbook and the deribit connection and some for the websocket creation
 rust_decimal = "1.35"
 rust_decimal_macros = "1.35"
 tokio-tungstenite = { version = "0.23.1", features = ["native-tls", "tokio-native-tls"]}
 tokio = { version = "1.39.2", features = ["full"] }
 serde_json = "1.0.125"
 futures-util = "0.3.30"
-
-# extra dependecies for creation of the websocket
 serde = {version = "1.0.209", features = ["derive"]}
 futures = {version = "0.3.30", default-features = false}
 uuid = {version = "1.10.0", features = ["serde", "v4"]}
 warp = "0.3.7"
 tokio-stream = "0.1.15"
 reqwest = { version = "0.12.7", features = ["json"] }
-
-# dependencies for TDengine database
-taos = "0.12.3"#this depends on parse_duration,
-#however, it seems to not bother us since we do not have any users or anything
+taos = { version = "0.12.3", default-features = false, features = ["ws-native-tls"]}

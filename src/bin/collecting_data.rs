@@ -4,23 +4,32 @@ use std::fmt::format;
 use std::str::FromStr;
 use futures_util::{StreamExt, SinkExt};
 use serde::{Deserialize, Serialize};
-use reqwest::Client;
+use reqwest::{Client, RequestBuilder};
+use rust_decimal::Decimal;
+use rust_decimal_macros::dec;
 use serde_json::{json, Value};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tokio_tungstenite::tungstenite::Message;
-use taos::TaosBuilder;
-use rust_matching_engine::{MessageContent, BestBidOrAskData, RegisterResponse};
+use warp::body::json;
+use rust_matching_engine::{place_limit_order,
+                           RegisterResponse,
+                           BestBidOrAskData,
+                           MessageContent
+};
+use taos::*;
 
+async fn build_taos_ws() -> Result<(), Box<dyn std::error::Error>> {
+    let dsn = "ws://127.0.0.1:6041";
+    let builder = TaosBuilder::from_dsn(dsn)?;
+    let taos = builder.build().await?;
+    let _ = taos.query("show databases").await?;
+    println!("Connected to taos");
+    Ok(())
+}
 
-// "INSERT INTO DATABASE.TABLE_NAME VALUES (NOW, bla, bla, bla,...);"
 #[tokio::main]
 async fn main() {
-    // Set up variables to be sent to TDengine DB
-    let mut current_best_ask: Option<f32>;
-    let mut current_best_bid: Option<f32>;
-
-    // Set up connection to local market
     let http_client = Client::new();
     let register_url = "http://127.0.0.1:8000/register";
 
@@ -61,6 +70,7 @@ async fn main() {
         ws_stream.send(Message::text("ping")).await.unwrap();
         println!("Message send to the server");
 
+        build_taos_ws().await.unwrap();
         // Receive messages from the WebSocket server
         while let Some(message) = ws_stream.next().await {
             match message {
@@ -69,13 +79,20 @@ async fn main() {
                         Message::Text(text) => {
                             match serde_json::from_str::<BestBidOrAskData>(&text) {
                                 Ok(parsed_msg) => {
-                                    // println!("Parsed message: {:?}", parsed_msg);
                                     if parsed_msg.topic == "BTC_USDT_deribit_best_bid_change" {
+                                        match serde_json::from_str::<MessageContent>(&parsed_msg.message) {
+                                            Ok(content) => {
+                                                println!("Parsed message: {:?}", &content);
+                                                let new_best_price = f32::from_str(&content.price).unwrap();
+                                                let side = &content.side;
+                                                // TODO: in here we send our stuff to the TDengine database
 
-                                        todo!();
+                                            },
+                                            Err(e) => println!("Failed to parse message content: {:?}", e),
+                                        }
                                     }
                                 },
-                                Err(e) => {println!("Failed to parse message: {:?}", e)},
+                                Err(e) => println!("Failed to parse message: {:?}", e),
                             }
                         }
                         _ => {
@@ -83,8 +100,7 @@ async fn main() {
                         }
                     }
                 },
-                Err(e) => {println!("Error: {:?}", e)
-                },
+                Err(e) => println!("Error: {:?}", e),
             }
         }
     } else {
