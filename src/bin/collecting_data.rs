@@ -1,4 +1,5 @@
-#[warn(dead_code)]
+#![allow(dead_code)]
+#![allow(unused_imports)]
 use std::fmt::format;
 use std::str::FromStr;
 use futures_util::{StreamExt, SinkExt};
@@ -8,21 +9,18 @@ use serde_json::{json, Value};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tokio_tungstenite::tungstenite::Message;
+use taos::TaosBuilder;
+use rust_matching_engine::{MessageContent, BestBidOrAskData, RegisterResponse};
 
-#[derive(Deserialize, Serialize, Debug)]
-pub struct RegisterResponse {
-    url: String,
-}
 
-#[derive(Debug, Deserialize)]
-struct BestBidOrAskData {
-    message: String,
-    topic: String,
-    user_id: u32,
-}
-
+// "INSERT INTO DATABASE.TABLE_NAME VALUES (NOW, bla, bla, bla,...);"
 #[tokio::main]
 async fn main() {
+    // Set up variables to be sent to TDengine DB
+    let mut current_best_ask: Option<f32>;
+    let mut current_best_bid: Option<f32>;
+
+    // Set up connection to local market
     let http_client = Client::new();
     let register_url = "http://127.0.0.1:8000/register";
 
@@ -74,6 +72,7 @@ async fn main() {
                                     // println!("Parsed message: {:?}", parsed_msg);
                                     if parsed_msg.topic == "BTC_USDT_deribit_best_bid_change" {
 
+                                        todo!();
                                     }
                                 },
                                 Err(e) => {println!("Failed to parse message: {:?}", e)},

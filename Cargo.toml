@@ -3,6 +3,18 @@ name = "rust_matching_engine"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "collecting_data"
+path = "src/bin/collecting_data.rs"
+
+[[bin]]
+name = "testing_warp_ws"
+path = "src/bin/testing_warp_ws.rs"
+
+[[bin]]
+name = "main"
+path = "src/main.rs"
+
 [dependencies]
 
 # dependecies for the local orderbook and the deribit connection and some for the websocket creation

@@ -12,46 +12,11 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tokio_tungstenite::tungstenite::Message;
 use warp::body::json;
-
-#[derive(Deserialize, Serialize, Debug)]
-pub struct RegisterResponse {
-    url: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct BestBidOrAskData {
-    message: String,
-    topic: String,
-    user_id: u32,
-}
-
-#[derive(Debug, Deserialize)]
-struct MessageContent {
-    price: String,
-    side: String,
-}
-
-pub async fn place_limit_order(trading_pair_base: &str,
-                               trading_pair_quote: &str,
-                               price: f64,
-                               side: &str,
-                               volume: f64,
-                               trader_id: &str,
-                               order_id: &str,
-                               ws_stream_ref: &mut WebSocketStream<MaybeTlsStream<TcpStream>>
-) {
-    let add_limit_order_msg = json!({"action": "add_limit_order",
-            "trading_pair_base": trading_pair_base,
-            "trading_pair_quote": trading_pair_quote,
-            "price": price,
-            "side": side,
-            "volume": volume,
-            "trader_id": trader_id,
-            "order_id": order_id
-        });
-    ws_stream_ref.send(Message::text(add_limit_order_msg.to_string())).await.unwrap();
-    println!("Sent the order request to the engine.");
-}
+use rust_matching_engine::{place_limit_order,
+                           RegisterResponse,
+                           BestBidOrAskData,
+                           MessageContent
+};
 
 #[tokio::main]
 async fn main() {
