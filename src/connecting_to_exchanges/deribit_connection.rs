@@ -20,8 +20,7 @@ use crate::matching_engine::{engine::{MatchingEngine, TradingPair},
 use crate::warp_websocket::handler::{Event};
 use crate::connecting_to_exchanges::for_all_exchanges::{TraderData, update_trader_data};
 
-// TODO: remove the Box<> in the Results as much as we can as it is slower (uses the heap)
-//  Just replace it with the correct error type.
+// TODO: refactor error handling (make it with '?' and Box< dyn std::error:Error>)
 
 fn make_trading_pair_type(input_from_deribit: &String) -> TradingPair {
     let parts: Vec<&str> = input_from_deribit.split('.').collect();

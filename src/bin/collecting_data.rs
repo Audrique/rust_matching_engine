@@ -113,7 +113,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                         best_bid_p
                                                     );
                                                     taos.exec(sql).await?;
-                                                    println!("Executed the inserting");
+                                                    // println!("Executed the inserting");
                                                 }
                                             },
                                             Err(e) => println!("Failed to parse message content: {:?}", e),
