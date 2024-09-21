@@ -19,17 +19,30 @@ use rust_matching_engine::{place_limit_order,
 };
 use taos::*;
 
-async fn build_taos_ws() -> Result<(), Box<dyn std::error::Error>> {
+struct BestAskAndBidInfo {
+    best_ask_price: Option<f32>,
+    best_bid_price: Option<f32>,
+}
+impl BestAskAndBidInfo {
+    pub fn new(best_ask_price: Option<f32>, best_bid_price: Option<f32>) -> BestAskAndBidInfo {
+        BestAskAndBidInfo {
+            best_ask_price,
+            best_bid_price
+        }
+    }
+}
+
+async fn build_taos_ws() -> Result<Taos, Box<dyn std::error::Error>> {
     let dsn = "ws://127.0.0.1:6041";
     let builder = TaosBuilder::from_dsn(dsn)?;
     let taos = builder.build().await?;
     let _ = taos.query("show databases").await?;
     println!("Connected to taos");
-    Ok(())
+    Ok(taos)
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let http_client = Client::new();
     let register_url = "http://127.0.0.1:8000/register";
 
@@ -69,8 +82,9 @@ async fn main() {
         // // Send a message to the WebSocket server
         ws_stream.send(Message::text("ping")).await.unwrap();
         println!("Message send to the server");
-
-        build_taos_ws().await.unwrap();
+        let table_name = "MICRO_SEC_DB.BA_BB_TEST";
+        let taos = build_taos_ws().await.unwrap();
+        let mut best_price_data = BestAskAndBidInfo::new(None, None);
         // Receive messages from the WebSocket server
         while let Some(message) = ws_stream.next().await {
             match message {
@@ -79,14 +93,28 @@ async fn main() {
                         Message::Text(text) => {
                             match serde_json::from_str::<BestBidOrAskData>(&text) {
                                 Ok(parsed_msg) => {
-                                    if parsed_msg.topic == "BTC_USDT_deribit_best_bid_change" {
+                                    if parsed_msg.topic == "BTC_USDT_deribit_best_bid_change" ||
+                                        parsed_msg.topic == "BTC_USDT_deribit_best_ask_change" {
                                         match serde_json::from_str::<MessageContent>(&parsed_msg.message) {
                                             Ok(content) => {
                                                 println!("Parsed message: {:?}", &content);
                                                 let new_best_price = f32::from_str(&content.price).unwrap();
-                                                let side = &content.side;
-                                                // TODO: in here we send our stuff to the TDengine database
-
+                                                let side = content.side.clone();
+                                                match side.as_str() {
+                                                    "ask" => {best_price_data.best_ask_price = Some(new_best_price);},
+                                                    "bid" => {best_price_data.best_bid_price = Some(new_best_price);},
+                                                    _ => eprintln!("Side is not bid or ask!")
+                                                }
+                                                if let (Some(best_ask_p), Some(best_bid_p)) = (best_price_data.best_ask_price, best_price_data.best_bid_price) {
+                                                    let sql = format!(
+                                                        "INSERT INTO {} (time, best_ask_price, best_bid_price) VALUES (NOW, {}, {});",
+                                                        table_name,
+                                                        best_ask_p,
+                                                        best_bid_p
+                                                    );
+                                                    taos.exec(sql).await?;
+                                                    println!("Executed the inserting");
+                                                }
                                             },
                                             Err(e) => println!("Failed to parse message content: {:?}", e),
                                         }
@@ -108,4 +136,5 @@ async fn main() {
         // Exit the program with a non-zero status code to indicate failure
         std::process::exit(1);
     }
+    Ok(())
 }

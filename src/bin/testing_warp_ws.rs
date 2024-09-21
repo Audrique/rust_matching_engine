@@ -68,7 +68,8 @@ async fn main() {
                         Message::Text(text) => {
                             match serde_json::from_str::<BestBidOrAskData>(&text) {
                                 Ok(parsed_msg) => {
-                                    if parsed_msg.topic == "BTC_USDT_deribit_best_bid_change" {
+                                    if parsed_msg.topic == "BTC_USDT_deribit_best_bid_change" ||
+                                        parsed_msg.topic == "BTC_USDT_deribit_best_ask_change" {
                                         match serde_json::from_str::<MessageContent>(&parsed_msg.message) {
                                             Ok(content) => {
                                                 println!("Parsed message: {:?}", &content);
