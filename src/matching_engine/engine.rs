@@ -38,7 +38,11 @@ impl TradingPair {
     }
 
     pub fn to_string(self) -> String {
-        format!("{}_{}", self.base, self.quote)
+        if self.quote.is_empty() {
+            self.base
+        } else {
+            format!("{}_{}", self.base, self.quote)
+        }
     }
 }
 

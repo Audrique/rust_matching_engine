@@ -73,6 +73,8 @@ async fn main() {
                                         match serde_json::from_str::<MessageContent>(&parsed_msg.message) {
                                             Ok(content) => {
                                                 println!("Parsed message: {:?}", &content);
+                                                // Only place bid orders for the moment since
+                                                // we do not keep track of our open orders and then we get negative spread
                                                 let new_best_price = f64::from_str(&content.price).unwrap();
                                                 let side = &content.side;
 

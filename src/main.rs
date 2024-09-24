@@ -41,11 +41,16 @@ async fn wait_for_server(rx: oneshot::Receiver<()>) {
 
 #[tokio::main]
 async fn main() {
-    let trading_pair = TradingPair::new("BTC".to_string(), "USDT".to_string());
-    let trading_pairs = vec![trading_pair.clone()];
+    let trading_pair_btc_perpetual = TradingPair::new("BTC-PERPETUAL".to_string(), "".to_string());
+    let trading_pair_btc_usdt = TradingPair::new("BTC".to_string(), "USDT".to_string());
+    let trading_pairs = vec![trading_pair_btc_usdt.clone(), trading_pair_btc_perpetual.clone()];
+
     let traders_data: Arc<TokioMutex<HashMap<String, TraderData>>> = Arc::new(TokioMutex::new(HashMap::new()));
     let mut engine = MatchingEngine::new();
-    engine.add_new_market(trading_pair.clone(), 0.0, 0.0);
+    // Add all the subscribed markets to the engine
+    for tp in &trading_pairs {
+        engine.add_new_market(tp.clone(), 0.0, 0.0);
+    }
 
     let engine = Arc::new(TokioMutex::new(engine));
 
@@ -61,8 +66,14 @@ async fn main() {
         let (client_id, client_secret) = read_config_file();
 
         authenticate_deribit(&mut ws_stream, &client_id, &client_secret).await;
-        let channel_btc_usdt = &format!("book.{}.raw", trading_pair.to_string());
-        let channels = vec![channel_btc_usdt];
+        // Create channels to subscribe to on the Deribit exchange
+        let mut channels = vec![];
+        for tp in &trading_pairs {
+            let channel = format!("book.{}.raw", tp.clone().to_string());
+            channels.push(channel);
+        }
+        println!("channels: {:?}", channels.clone());
+
         establish_heartbeat(&mut ws_stream, 10).await.unwrap();
         subscribe_to_channel(&mut ws_stream, channels).await.unwrap();
         // Wait for the server to be ready before processing messages

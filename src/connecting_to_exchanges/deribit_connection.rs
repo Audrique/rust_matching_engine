@@ -78,7 +78,7 @@ pub async fn authenticate_deribit(ws_stream_ref: &mut WebSocketStream<MaybeTlsSt
 }
 
 pub async fn subscribe_to_channel(ws_stream_ref: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
-                                  channels: Vec<&String>) -> Result<(), Box<dyn Error>> {
+                                  channels: Vec<String>) -> Result<(), Box<dyn Error>> {
     // Subscribe to the raw data channel after authentication
     let msg = json!({
         "method":"public/subscribe",
@@ -178,7 +178,7 @@ pub async fn on_incoming_deribit_message(
     let previous_best_asks: Arc<TokioMutex<HashMap<TradingPair, Decimal>>> = Arc::new(TokioMutex::new(HashMap::new()));
     let on_hold_changes = initialize_on_hold_changes(trading_pairs.clone());
     let publish_client = Arc::new(Client::new());
-    let mut previous_change_id: Option<u64> = None;
+    let mut previous_change_ids: HashMap<String, u64> = HashMap::new();
     let mut number_of_missed_changes: u32 = 0;
 
     // Spawn a new task for periodic publishing
@@ -203,15 +203,15 @@ pub async fn on_incoming_deribit_message(
                             .map(|(price, limit)| (price.clone(), limit.total_volume()))
                             .collect();
                         let topic = format!("{}_deribit_top_10_asks_bids_periodically", t_pair.clone().to_string());
+                        // println!("the topic: {:?}", topic);
                         let message = format!("Top 10 asks: {:?}; Top 10 bids: {:?}", top_10_asks, top_10_bids);
                         publish_message(message, topic, &publish_client).await.unwrap();
-
-                        // Also publish the traders data
-                        let topic2 = "traders_data_periodically".to_string();
-                        let traders_data2 = traders_data_cloned.lock().await;
-                        let message2 = serde_json::to_string(&*traders_data2).unwrap();
-                        publish_message(message2, topic2, &publish_client).await.unwrap();
                     }
+                    // Also publish the traders data
+                    let topic2 = "traders_data_periodically".to_string();
+                    let traders_data2 = traders_data_cloned.lock().await;
+                    let message2 = serde_json::to_string(&*traders_data2).unwrap();
+                    publish_message(message2, topic2, &publish_client).await.unwrap();
                 };
                 // Wait for 250 ms
                 tokio::time::sleep(Duration::from_millis(250)).await;
@@ -267,15 +267,18 @@ pub async fn on_incoming_deribit_message(
                     // Checking for missed updates
                     let current_change_id = data["params"]["data"]["change_id"].as_u64();
                     let current_previous_change_id = data["params"]["data"]["prev_change_id"].as_u64();
-                    if let (Some(current_change_id), Some(current_previous_change_id)) = (current_change_id, current_previous_change_id) {
-                        if let Some(prev_id) = previous_change_id {
-                            if current_previous_change_id != prev_id {
+                    let current_channel = data["params"]["channel"].as_str();
+                    if let (Some(current_change_id), Some(current_previous_change_id), Some(channel_str)) =
+                        (current_change_id, current_previous_change_id, current_channel) {
+                        let channel = channel_str.to_string();
+                        if let Some(prev_id) = previous_change_ids.get(&channel) {
+                            if current_previous_change_id != prev_id.clone() {
                                 number_of_missed_changes += 1;
                                 println!("The number of missed updates: {number_of_missed_changes}");
-                                println!("The previous change was: {:?}, and the expected previous change: {:?}", &previous_change_id, &current_previous_change_id);
+                                println!("The previous change was: {:?}, and the expected previous change: {:?}", prev_id, &current_previous_change_id);
                             }
                         }
-                        previous_change_id = Some(current_change_id.clone());
+                        previous_change_ids.insert(channel, current_change_id.clone());
                     }
                 } else { println!("Received message which we do not process: {:?}", data) }
             },
@@ -551,7 +554,7 @@ async fn check_and_publish_price_change(
             "price": new_price
         }).to_string();
         publish_message(message.clone(), topic, &publish_client).await?;
-        println!("published {}", message);
+        println!("For {:?} published {}", trading_pair.clone(), message);
     }
     Ok(())
 }
