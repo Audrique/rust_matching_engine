@@ -71,6 +71,8 @@ async fn main() {
         for tp in &trading_pairs {
             let channel = format!("book.{}.raw", tp.clone().to_string());
             channels.push(channel);
+            let channel = format!("trades.{}.raw", tp.clone().to_string());
+            channels.push(channel);
         }
         println!("channels: {:?}", channels.clone());
 

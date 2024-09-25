@@ -243,42 +243,56 @@ pub async fn on_incoming_deribit_message(
                     println!("Subscription response result: {:?}", data["result"]);
                     continue
                 } else if data["method"] == "subscription" {
-                    let previous_best_bids = Arc::clone(&previous_best_bids);
-                    let previous_best_asks = Arc::clone(&previous_best_asks);
-                    let matching_engine = Arc::clone(&matching_engine);
-                    let publish_client = Arc::clone(&publish_client);
-                    let on_hold_changes = Arc::clone(&on_hold_changes);
-                    let traders_data_cloned = Arc::clone(&traders_data);
-                    // Immediately offload the message processing to another function/task.
-                    let msg = data.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = process_message(
-                            msg,
-                            matching_engine,
-                            previous_best_bids,
-                            previous_best_asks,
-                            publish_client,
-                            on_hold_changes,
-                            traders_data_cloned
-                        ).await {
-                            eprintln!("Error processing message: {:?}", e);
-                        }
-                    });
-                    // Checking for missed updates
-                    let current_change_id = data["params"]["data"]["change_id"].as_u64();
-                    let current_previous_change_id = data["params"]["data"]["prev_change_id"].as_u64();
-                    let current_channel = data["params"]["channel"].as_str();
-                    if let (Some(current_change_id), Some(current_previous_change_id), Some(channel_str)) =
-                        (current_change_id, current_previous_change_id, current_channel) {
-                        let channel = channel_str.to_string();
-                        if let Some(prev_id) = previous_change_ids.get(&channel) {
-                            if current_previous_change_id != prev_id.clone() {
-                                number_of_missed_changes += 1;
-                                println!("The number of missed updates: {number_of_missed_changes}");
-                                println!("The previous change was: {:?}, and the expected previous change: {:?}", prev_id, &current_previous_change_id);
+                    let channel = data["params"]["channel"]
+                        .as_str()
+                        .expect("Converting to string failed!")
+                        .split('.')
+                        .next()
+                        .expect("No part before the first '.'");
+                    match channel {
+                        "book" => {
+                            let previous_best_bids = Arc::clone(&previous_best_bids);
+                            let previous_best_asks = Arc::clone(&previous_best_asks);
+                            let matching_engine = Arc::clone(&matching_engine);
+                            let publish_client = Arc::clone(&publish_client);
+                            let on_hold_changes = Arc::clone(&on_hold_changes);
+                            let traders_data_cloned = Arc::clone(&traders_data);
+                            // Immediately offload the message processing to another function/task.
+                            let msg = data.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = process_message(
+                                    msg,
+                                    matching_engine,
+                                    previous_best_bids,
+                                    previous_best_asks,
+                                    publish_client,
+                                    on_hold_changes,
+                                    traders_data_cloned
+                                ).await {
+                                    eprintln!("Error processing message: {:?}", e);
+                                }
+                            });
+                            // Checking for missed updates
+                            let current_change_id = data["params"]["data"]["change_id"].as_u64();
+                            let current_previous_change_id = data["params"]["data"]["prev_change_id"].as_u64();
+                            let current_channel = data["params"]["channel"].as_str();
+                            if let (Some(current_change_id), Some(current_previous_change_id), Some(channel_str)) =
+                                (current_change_id, current_previous_change_id, current_channel) {
+                                let channel = channel_str.to_string();
+                                if let Some(prev_id) = previous_change_ids.get(&channel) {
+                                    if current_previous_change_id != prev_id.clone() {
+                                        number_of_missed_changes += 1;
+                                        println!("The number of missed updates: {number_of_missed_changes}");
+                                        println!("The previous change was: {:?}, and the expected previous change: {:?}", prev_id, &current_previous_change_id);
+                                    }
+                                }
+                                previous_change_ids.insert(channel, current_change_id.clone());
                             }
-                        }
-                        previous_change_ids.insert(channel, current_change_id.clone());
+                        },
+                        "trades" => {
+                            println!("got a trade update");
+                        },
+                        _ => {eprintln!("Unexpected channel message!")}
                     }
                 } else { println!("Received message which we do not process: {:?}", data) }
             },
@@ -522,7 +536,6 @@ async fn update_orders_and_get_best_price(
                  &mut on_hold_changes_,
                  Duration::from_secs(2),
                  traders_data).await;
-
     let orderbook = engine.orderbooks.get(trading_pair).ok_or("Orderbook not found")?;
     let (best_price, _) = match bid_or_ask {
         BidOrAsk::Ask => orderbook.asks.first_key_value(),
