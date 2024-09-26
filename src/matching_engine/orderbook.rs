@@ -3,10 +3,10 @@ use std::cmp::Ordering;
 use rust_decimal::prelude::*;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-pub fn unix_timestamp_now() -> u128 {
+pub fn unix_timestamp_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_micros())
+        .map(|duration| duration.as_micros() as u64) // the casting from u128 to u64 will work until the year 586_912
         .unwrap_or_else(|_| {
             eprintln!("System time went backwards!");
             0
@@ -25,7 +25,7 @@ pub struct Trade {
     pub trader_id_maker: String,
     pub volume: f64,
     pub price: Decimal,
-    pub timestamp: u128,
+    pub timestamp: u64,
     pub taker_fee: f64,
     pub maker_fee: f64,
 }
@@ -33,7 +33,7 @@ impl Trade {
     pub fn new(trader_id_taker: String,
                trader_id_maker: String,
                volume: f64, price: Decimal,
-               timestamp: u128,
+               timestamp: u64,
                taker_fee: f64,
                maker_fee: f64) -> Trade {
         Trade {
