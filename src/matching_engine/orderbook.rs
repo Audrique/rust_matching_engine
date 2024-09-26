@@ -2,6 +2,7 @@ use std::collections::{HashMap, BTreeMap};
 use std::cmp::Ordering;
 use rust_decimal::prelude::*;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use serde::Serialize;
 
 pub fn unix_timestamp_now() -> u64 {
     SystemTime::now()
@@ -19,7 +20,7 @@ pub enum BidOrAsk {
     Ask,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Trade {
     pub trader_id_taker: String,
     pub trader_id_maker: String,

@@ -16,7 +16,7 @@ use crate::{Clients};
 use reqwest::Client;
 use serde::ser::SerializeTuple;
 use crate::matching_engine::{engine::{MatchingEngine, TradingPair},
-                             orderbook::{Order, BidOrAsk}};
+                             orderbook::{Order, BidOrAsk, Trade}};
 use crate::warp_websocket::handler::{Event};
 use crate::connecting_to_exchanges::for_all_exchanges::{TraderData, update_trader_data};
 
@@ -168,6 +168,7 @@ fn initialize_on_hold_changes(trading_pairs: Vec<TradingPair>,
 // Topics: {pair}_{deribit}_best_bid_change, sends the best bid price if it changes (volume could be included later)
 //         {pair}_{deribit}_best_ask_change, sends the best ask price if it changes (idem as above)
 //         {pair}_{deribit}_top_10_asks_bids_periodically, sends the top 10 bids and asks every 100ms (prices and volume)
+//         trades.{deribit}.{pair}, sends trades that happen for the given exchange and trading_pair
 pub async fn on_incoming_deribit_message(
     ws_stream_ref: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
     matching_engine: Arc<TokioMutex<MatchingEngine>>,
@@ -219,7 +220,6 @@ pub async fn on_incoming_deribit_message(
         })
     };
 
-
     loop {
         // Only handle messages from the WebSocket stream.
         match ws_stream_ref.next().await {
@@ -236,7 +236,7 @@ pub async fn on_incoming_deribit_message(
                     println!("Heartbeat received");
                     send_heartbeat(ws_stream_ref).await.expect("Problem sending heartbeat");
                     println!("Heartbeat sent");
-                    // This is the id with which we send the heartbeat, the response will have the same id
+                    // 888 is the id with which we send the heartbeat, the response will have the same id
                 } else if data["id"] == 888 {
                     continue
                 } else if data["id"] == 9922 {
@@ -290,7 +290,39 @@ pub async fn on_incoming_deribit_message(
                             }
                         },
                         "trades" => {
-                            println!("got a trade update");
+                            let trading_pair = data["params"]["channel"]
+                                .as_str()
+                                .expect("Converting to string failed!")
+                                .split('.')
+                                .nth(1)
+                                .expect("No second '.' part found!");
+
+                            let mut trades: Vec<Trade> = vec!();
+                            if let Value::Array(data_arr) = data["params"]["data"].clone() {
+                                for trade_data in data_arr {
+                                    let volume = trade_data["amount"].as_f64().expect("Converting amount to f64 failed!");
+                                    let timestamp = trade_data["timestamp"].as_u64().expect("Converting timestamp to u64 failed!");
+                                    let price = trade_data["price"].as_f64().expect("Converting price to f64 failed!");
+                                    let price_dec = Decimal::from_f64(price).expect("Problem converting price");
+                                    let direction = trade_data["direction"].as_str().expect("Converting direction to str, failed!");
+                                    let taker_id = format!("deribit_exchange_{}", direction);
+                                    let trade = Trade::new(taker_id,
+                                                           "deribit_exchange".to_string(),
+                                                           volume,
+                                                           price_dec,
+                                                           timestamp,
+                                                           0.0,
+                                                           0.0
+                                    );
+                                    trades.push(trade);
+                                }
+                            }
+                            let topic = format!("trades.deribit.{}", trading_pair.to_string());
+                            let message = json!({
+                                "trades": trades
+                            }).to_string();
+                            publish_message(message.clone(), topic, &publish_client).await.unwrap();
+                            println!("Published trades");
                         },
                         _ => {eprintln!("Unexpected channel message!")}
                     }
@@ -519,6 +551,8 @@ async fn process_order_updates(
     Ok(())
 }
 
+// TODO: check more about the 'No orders found'. Since I added the trade subscription I get this message in the beginning.
+//  Check if the orderbook is still correct with the deribit orderbooks
 async fn update_orders_and_get_best_price(
     updates: &Vec<Value>,
     bid_or_ask: BidOrAsk,
