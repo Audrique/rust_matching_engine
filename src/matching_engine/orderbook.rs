@@ -138,7 +138,7 @@ impl Orderbook {
                 match self.bids.get_mut(&price) {
                     Some(limit) => {
                         limit.add_order(order);
-                        return Vec::new()
+                        Vec::new()
                     },
                     None => {
                         let (remaining_volume, trades) = self.fill_limit_order(&mut order.clone(), price);
@@ -148,7 +148,7 @@ impl Orderbook {
                             limit.add_order(order);
                             self.bids.insert(price, limit);
                         }
-                        return trades
+                        trades
                     },
                 }
 
@@ -156,7 +156,7 @@ impl Orderbook {
             BidOrAsk::Ask => match self.asks.get_mut(&price) {
                 Some(limit) => {
                     limit.add_order(order);
-                    return Vec::new()
+                    Vec::new()
                 },
                 None => {
                     let (remaining_volume, trades) = self.fill_limit_order(&mut order.clone(), price);
@@ -166,7 +166,7 @@ impl Orderbook {
                         limit.add_order(order);
                         self.asks.insert(price, limit);
                     }
-                    return trades
+                    trades
                 },
             }
         }
