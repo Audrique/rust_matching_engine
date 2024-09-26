@@ -1,7 +1,17 @@
 use std::collections::{HashMap, BTreeMap};
 use std::cmp::Ordering;
 use rust_decimal::prelude::*;
-use tokio::time::Instant;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+pub fn unix_timestamp_now() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_micros())
+        .unwrap_or_else(|_| {
+            eprintln!("System time went backwards!");
+            0
+        })
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum BidOrAsk {
@@ -15,7 +25,7 @@ pub struct Trade {
     pub trader_id_maker: String,
     pub volume: f64,
     pub price: Decimal,
-    timestamp: Instant,
+    pub timestamp: u128,
     pub taker_fee: f64,
     pub maker_fee: f64,
 }
@@ -23,7 +33,7 @@ impl Trade {
     pub fn new(trader_id_taker: String,
                trader_id_maker: String,
                volume: f64, price: Decimal,
-               timestamp: Instant,
+               timestamp: u128,
                taker_fee: f64,
                maker_fee: f64) -> Trade {
         Trade {
@@ -305,7 +315,7 @@ impl Limit {
                                 limit_order.trader_id.clone(),
                                 limit_order.size.clone(),
                                 price.clone(),
-                                Instant::now(),
+                                unix_timestamp_now(),
                                 taker_fee,
                                 maker_fee
                             )
@@ -323,7 +333,7 @@ impl Limit {
                                 limit_order.trader_id.clone(),
                                 market_order.size.clone(),
                                 price.clone(),
-                                Instant::now(),
+                                unix_timestamp_now(),
                                 taker_fee,
                                 maker_fee
                             )
