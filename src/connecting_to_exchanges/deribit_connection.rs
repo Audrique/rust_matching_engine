@@ -16,7 +16,7 @@ use crate::{Clients};
 use reqwest::Client;
 use serde::ser::SerializeTuple;
 use crate::matching_engine::{engine::{MatchingEngine, TradingPair},
-                             orderbook::{Order, BidOrAsk, Trade}};
+                             orderbook::{Order, BidOrAsk, Trade, BuyOrSell}};
 use crate::warp_websocket::handler::{Event};
 use crate::connecting_to_exchanges::for_all_exchanges::{TraderData, update_trader_data};
 
@@ -304,22 +304,28 @@ pub async fn on_incoming_deribit_message(
                                     let timestamp = trade_data["timestamp"].as_u64().expect("Converting timestamp to u64 failed!");
                                     let price = trade_data["price"].as_f64().expect("Converting price to f64 failed!");
                                     let price_dec = Decimal::from_f64(price).expect("Problem converting price");
-                                    let direction = trade_data["direction"].as_str().expect("Converting direction to str, failed!");
-                                    let taker_id = format!("deribit_exchange_{}", direction);
-                                    let trade = Trade::new(taker_id,
+                                    let direction_str = trade_data["direction"].as_str().expect("Converting direction to str, failed!");
+                                    let direction = match direction_str {
+                                        "buy" => {Ok(BuyOrSell::Buy)},
+                                        "sell"=> {Ok(BuyOrSell::Sell)},
+                                        _ => {eprintln!("Error converting direction to Buy or Sell!");
+                                            Err("Error converting direction to Buy or Sell!")}
+                                    };
+                                    let trade = Trade::new("deribit_exchange".to_string(),
                                                            "deribit_exchange".to_string(),
                                                            volume,
                                                            price_dec,
                                                            timestamp,
                                                            0.0,
-                                                           0.0
+                                                           0.0,
+                                                           direction.unwrap(),
                                     );
                                     trades.push(trade);
                                 }
                             }
                             let topic = format!("trades.deribit.{}", trading_pair.to_string());
                             let message = json!({
-                                "trades": trades
+                                "trades": trades,
                             }).to_string();
                             publish_message(message.clone(), topic, &publish_client).await.unwrap();
                             println!("Published trades");

@@ -13,6 +13,11 @@ pub fn unix_timestamp_now() -> u64 {
             0
         })
 }
+#[derive(Debug, Clone, Serialize)]
+pub enum BuyOrSell {
+    Buy,
+    Sell,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum BidOrAsk {
@@ -29,6 +34,7 @@ pub struct Trade {
     pub timestamp: u64,
     pub taker_fee: f64,
     pub maker_fee: f64,
+    pub direction: BuyOrSell
 }
 impl Trade {
     pub fn new(trader_id_taker: String,
@@ -36,7 +42,9 @@ impl Trade {
                volume: f64, price: Decimal,
                timestamp: u64,
                taker_fee: f64,
-               maker_fee: f64) -> Trade {
+               maker_fee: f64,
+               direction: BuyOrSell,
+    ) -> Trade {
         Trade {
             trader_id_taker,
             trader_id_maker,
@@ -44,7 +52,8 @@ impl Trade {
             price,
             timestamp,
             taker_fee,
-            maker_fee
+            maker_fee,
+            direction
         }
     }
 }
@@ -302,6 +311,10 @@ impl Limit {
     pub fn fill_order(&mut self, market_order: &mut Order, price: Decimal, taker_fee: f64, maker_fee: f64) -> Vec<Trade> {
         let mut i = 0;
         let mut happened_trades: Vec<Trade> = Vec::new();
+        let direction = match market_order.bid_or_ask {
+            BidOrAsk::Bid => {BuyOrSell::Buy},
+            BidOrAsk::Ask => {BuyOrSell::Sell}
+        };
 
         while i < self.orders.len() {
             let limit_order = &mut self.orders[i];
@@ -318,7 +331,8 @@ impl Limit {
                                 price.clone(),
                                 unix_timestamp_now(),
                                 taker_fee,
-                                maker_fee
+                                maker_fee,
+                                direction.clone()
                             )
                         );
                         limit_order.size = 0.0;
@@ -336,7 +350,8 @@ impl Limit {
                                 price.clone(),
                                 unix_timestamp_now(),
                                 taker_fee,
-                                maker_fee
+                                maker_fee,
+                                direction.clone()
                             )
                         );
                         market_order.size = 0.0;
