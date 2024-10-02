@@ -14,8 +14,8 @@ use tokio_tungstenite::tungstenite::Message;
 use warp::body::json;
 use rust_matching_engine::{place_limit_order,
                            RegisterResponse,
-                           BestBidOrAskData,
-                           MessageContent
+                           EngineData,
+                           BestPriceUpdate
 };
 
 #[tokio::main]
@@ -26,7 +26,7 @@ async fn main() {
     let pair_string = "BTC_USDT".to_string();
     let exchange = "deribit".to_string();
     // Subscribe to the BTC_USDT pair on best_bid_change
-    let topic_bid = format!("{}_{}_best_bid_change", pair_string.clone(), exchange.clone());
+    let topic_bid = format!("best_bid_change.{}.{}", exchange.clone(), pair_string.clone());
     let register_request = json!({ "user_id": 1, "topic": topic_bid});
 
     let response = http_client.post(register_url)
@@ -40,7 +40,7 @@ async fn main() {
         println!("Successfully registered client! WebSocket URL: {}", register_response.url);
         // add the topic of the best ask
         let add_topic_url = "http://127.0.0.1:8000/add_topic";
-        let topic_ask = format!("{}_{}_best_ask_change", pair_string.clone(), exchange.clone());
+        let topic_ask = format!("best_ask_change.{}.{}", exchange.clone(), pair_string.clone());
         let client_id = register_response.url.split('/').last().unwrap_or("");
         let add_topic_request = json!({"topic": topic_ask, "client_id": client_id});
         let add_topic_response = http_client.post(add_topic_url)
@@ -66,11 +66,11 @@ async fn main() {
                 Ok(msg) => {
                     match msg {
                         Message::Text(text) => {
-                            match serde_json::from_str::<BestBidOrAskData>(&text) {
+                            match serde_json::from_str::<EngineData>(&text) {
                                 Ok(parsed_msg) => {
-                                    if parsed_msg.topic == "BTC_USDT_deribit_best_bid_change" ||
-                                        parsed_msg.topic == "BTC_USDT_deribit_best_ask_change" {
-                                        match serde_json::from_str::<MessageContent>(&parsed_msg.message) {
+                                    if parsed_msg.topic == "best_bid_change.deribit.BTC_USDT" ||
+                                        parsed_msg.topic == "best_ask_change.deribit.BTC_USDT" {
+                                        match serde_json::from_str::<BestPriceUpdate>(&parsed_msg.message) {
                                             Ok(content) => {
                                                 println!("Parsed message: {:?}", &content);
                                                 // Only place bid orders for the moment since

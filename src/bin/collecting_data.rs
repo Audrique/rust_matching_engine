@@ -14,23 +14,41 @@ use tokio_tungstenite::tungstenite::Message;
 use warp::body::json;
 use rust_matching_engine::{place_limit_order,
                            RegisterResponse,
-                           BestBidOrAskData,
-                           MessageContent
+                           EngineData,
+                           BestPriceUpdate
 };
 use taos::*;
 
-struct BestAskAndBidInfo {
+struct BestAskAndBidData {
     best_ask_price: Option<f32>,
     best_bid_price: Option<f32>,
 }
-impl BestAskAndBidInfo {
-    pub fn new(best_ask_price: Option<f32>, best_bid_price: Option<f32>) -> BestAskAndBidInfo {
-        BestAskAndBidInfo {
-            best_ask_price,
-            best_bid_price
+impl BestAskAndBidData {
+    pub fn new() -> BestAskAndBidData {
+        BestAskAndBidData {
+            best_ask_price: None,
+            best_bid_price: None,
         }
     }
 }
+
+#[derive(Debug, Deserialize)]
+struct Trade {
+    direction : String,
+    maker_fee: f32,
+    price: String, // This is a string since we start from a Decimal and is not identified as a number when sent.
+    taker_fee: f32,
+    timestamp: u64,
+    trader_id_maker: String,
+    trader_id_taker: String,
+    volume: f32,
+}
+// Combined struct for aggregating data
+#[derive(Debug, Deserialize)]
+struct TradeData {
+    trades: Vec<Trade>,
+}
+
 
 async fn build_taos_ws() -> Result<Taos, Box<dyn std::error::Error>> {
     let dsn = "ws://127.0.0.1:6041";
@@ -46,11 +64,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let http_client = Client::new();
     let register_url = "http://127.0.0.1:8000/register";
 
-    let pair_string = "BTC_USDT".to_string();
     let exchange = "deribit".to_string();
+    let trading_pairs = ["BTC_USDT".to_string(), "BTC-PERPETUAL".to_string()];
     // Subscribe to the BTC_USDT pair on best_bid_change
-    let topic_bid = format!("{}_{}_best_bid_change", pair_string.clone(), exchange.clone());
-    let register_request = json!({ "user_id": 1, "topic": topic_bid});
+    let mut topics: Vec<String> = vec![];
+    for trading_pair in trading_pairs {
+        topics.push(format!("best_bid_change.{}.{}", exchange.clone(), trading_pair.clone()));
+        topics.push(format!("best_ask_change.{}.{}", exchange.clone(), trading_pair.clone()));
+        topics.push(format!("trades.{}.{}", exchange.clone(), trading_pair.clone()));
+    }
+    let register_request = json!({ "user_id": 1, "topic": ""});
 
     let response = http_client.post(register_url)
         .json(&register_request)  // Send as JSON
@@ -61,19 +84,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if response.status().is_success() {
         let register_response: RegisterResponse = response.json().await.expect("Failed to parse response");
         println!("Successfully registered client! WebSocket URL: {}", register_response.url);
+
         // add the topic of the best ask
         let add_topic_url = "http://127.0.0.1:8000/add_topic";
-        let topic_ask = format!("{}_{}_best_ask_change", pair_string.clone(), exchange.clone());
         let client_id = register_response.url.split('/').last().unwrap_or("");
-        let add_topic_request = json!({"topic": topic_ask, "client_id": client_id});
-        let add_topic_response = http_client.post(add_topic_url)
-            .json(&add_topic_request)  // Send as JSON
-            .send()
-            .await
-            .expect("Failed to send request");
-        let add_topic_response2: String  = add_topic_response.text().await.expect("Failed to parse response");
-        println!("Successfully added a topic for the client: {}", add_topic_response2);
 
+        for topic in topics {
+            let add_topic_request = json!({"topic": topic, "client_id": client_id});
+            let add_topic_response = http_client.post(add_topic_url)
+                .json(&add_topic_request)  // Send as JSON
+                .send()
+                .await
+                .expect("Failed to send request");
+            let add_topic_response: String = add_topic_response.text().await.expect("Failed to parse response");
+            println!("Successfully added {:?} for the client: {}", &topic, add_topic_response);
+        }
         // Now we have a URL which we are registered with under register_response.url and can now get a websocket_connection
         let (mut ws_stream, _) = connect_async(register_response.url).await.expect("Failed to connect");
 
@@ -82,43 +107,66 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // // Send a message to the WebSocket server
         ws_stream.send(Message::text("ping")).await.unwrap();
         println!("Message send to the server");
-        let table_name = "MICRO_SEC_DB.BA_BB_TEST";
+
+        let price_update_table_name = "MICRO_SEC_DB.DERIBIT_BTC_USDT_AND_DERIBIT_BTC_PERPETUAL_BEST_PRICES";
+        let trade_update_table_name = "MICRO_SEC_DB.DERIBIT_BTC_USDT_AND_DERIBIT_BTC_PERPETUAL_TRADES";
         let taos = build_taos_ws().await.unwrap();
-        let mut best_price_data = BestAskAndBidInfo::new(None, None);
+        let mut best_price_data = BestAskAndBidData::new();
         // Receive messages from the WebSocket server
         while let Some(message) = ws_stream.next().await {
             match message {
                 Ok(msg) => {
                     match msg {
                         Message::Text(text) => {
-                            match serde_json::from_str::<BestBidOrAskData>(&text) {
+                            match serde_json::from_str::<EngineData>(&text) {
                                 Ok(parsed_msg) => {
-                                    if parsed_msg.topic == "BTC_USDT_deribit_best_bid_change" ||
-                                        parsed_msg.topic == "BTC_USDT_deribit_best_ask_change" {
-                                        match serde_json::from_str::<MessageContent>(&parsed_msg.message) {
-                                            Ok(content) => {
-                                                println!("Parsed message: {:?}", &content);
-                                                let new_best_price = f32::from_str(&content.price).unwrap();
-                                                let side = content.side.clone();
-                                                match side.as_str() {
-                                                    "ask" => {best_price_data.best_ask_price = Some(new_best_price);},
-                                                    "bid" => {best_price_data.best_bid_price = Some(new_best_price);},
-                                                    _ => eprintln!("Side is not bid or ask!")
-                                                }
-                                                if let (Some(best_ask_p), Some(best_bid_p)) = (best_price_data.best_ask_price, best_price_data.best_bid_price) {
-                                                    let sql = format!(
-                                                        "INSERT INTO {} (time, best_ask_price, best_bid_price) VALUES (NOW, {}, {});",
-                                                        table_name,
-                                                        best_ask_p,
-                                                        best_bid_p
-                                                    );
-                                                    taos.exec(sql).await?;
-                                                    // println!("Executed the inserting");
-                                                }
-                                            },
-                                            Err(e) => println!("Failed to parse message content: {:?}", e),
+                                    if let Some(trading_pair) = parsed_msg.topic.split(".").last() {
+                                        if parsed_msg.topic.starts_with("best") {
+                                            match serde_json::from_str::<BestPriceUpdate>(&parsed_msg.message) {
+                                                Ok(best_price_update) => {
+                                                    // println!("Parsed message: {:?}", &best_price_update);
+                                                    let new_best_price = f32::from_str(&best_price_update.price).unwrap();
+                                                    let side = best_price_update.side.clone();
+                                                    match side.as_str() {
+                                                        "ask" => { best_price_data.best_ask_price = Some(new_best_price); },
+                                                        "bid" => { best_price_data.best_bid_price = Some(new_best_price); },
+                                                        _ => eprintln!("Side is not bid or ask!")
+                                                    }
+                                                    if let (Some(best_ask_p), Some(best_bid_p)) = (best_price_data.best_ask_price, best_price_data.best_bid_price) {
+                                                        let sql = format!(
+                                                            "INSERT INTO {} (time, instrument, best_ask_price, best_bid_price) VALUES (NOW, '{}', {}, {});",
+                                                            price_update_table_name,
+                                                            trading_pair,
+                                                            best_ask_p,
+                                                            best_bid_p
+                                                        );
+                                                        taos.exec(sql).await?;
+                                                        // println!("Executed the inserting of price data");
+                                                    }
+                                                },
+                                                Err(e) => println!("Failed to parse message content into price update data: {:?}", e),
+                                            }
+                                        } else if parsed_msg.topic.starts_with("trades") {
+                                            match serde_json::from_str::<TradeData>(&parsed_msg.message) {
+                                                Ok(trades) => {
+                                                    // println!("Parsed message: {:?}", &trades);
+                                                    for trade in trades.trades {
+                                                        let sql = format!(
+                                                            "INSERT INTO {} (time, instrument, direction, price, volume) VALUES (NOW, '{}', '{}', {}, {});",
+                                                            trade_update_table_name,
+                                                            trading_pair,
+                                                            trade.direction,
+                                                            trade.price,
+                                                            trade.volume,
+                                                        );
+                                                        taos.exec(sql).await?;
+                                                        // println!("Executed the inserting of trade");
+                                                    }
+                                                },
+                                                Err(e) => println!("Failed to parse message content into trade data: {:?}", e),
+                                            }
                                         }
-                                    }
+                                    } else { println!("Failed to find a tradingpair") }
                                 },
                                 Err(e) => println!("Failed to parse message: {:?}", e),
                             }

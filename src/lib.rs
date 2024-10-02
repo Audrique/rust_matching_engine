@@ -12,14 +12,14 @@ pub struct RegisterResponse {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct BestBidOrAskData {
+pub struct EngineData {
     pub message: String,
     pub topic: String,
     pub user_id: u32,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct MessageContent {
+pub struct BestPriceUpdate {
     pub price: String,
     pub side: String,
 }
