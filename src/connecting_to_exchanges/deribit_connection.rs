@@ -165,10 +165,11 @@ fn initialize_on_hold_changes(trading_pairs: Vec<TradingPair>,
 }
 
 // deribit can change to exchange later
-// Topics: {pair}_{deribit}_best_bid_change, sends the best bid price if it changes (volume could be included later)
-//         {pair}_{deribit}_best_ask_change, sends the best ask price if it changes (idem as above)
-//         {pair}_{deribit}_top_10_asks_bids_periodically, sends the top 10 bids and asks every 100ms (prices and volume)
+// Topics: best_bid_change.{deribit}.{pair}, sends the best bid price if it changes (volume could be included later)
+//         best_ask_change.{deribit}.{pair}, sends the best ask price if it changes (idem as above)
+//         top_10_asks_bids_periodically.{deribit}.{pair}, sends the top 10 bids and asks every 250ms (prices and volume)
 //         trades.{deribit}.{pair}, sends trades that happen for the given exchange and trading_pair
+//         traders_data_periodically, sends all connected traders positions and trading_profit every 250ms
 pub async fn on_incoming_deribit_message(
     ws_stream_ref: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
     matching_engine: Arc<TokioMutex<MatchingEngine>>,
@@ -203,8 +204,8 @@ pub async fn on_incoming_deribit_message(
                             .take(10)
                             .map(|(price, limit)| (price.clone(), limit.total_volume()))
                             .collect();
-                        let topic = format!("{}_deribit_top_10_asks_bids_periodically", t_pair.clone().to_string());
-                        // println!("the topic: {:?}", topic);
+                        let topic = format!("top_10_asks_bids_periodically.deribit.{}", t_pair.clone().to_string());
+                        // TODO: Change this to JSON format instead of how it is now
                         let message = format!("Top 10 asks: {:?}; Top 10 bids: {:?}", top_10_asks, top_10_bids);
                         publish_message(message, topic, &publish_client).await.unwrap();
                     }
@@ -394,7 +395,7 @@ async fn place_orders(update: &Vec<Value>,
                                 .insert(price, (volume, Instant::now()));}
                         },
                         "new" => {
-                            // TODO: publish the trades at the correct topic '{deribit}_{pair}_trades, topic or something
+                            // TODO: publish the trades at the correct topic 'trades.{deribit}.{pair}
                             //  Also, in the client_msg function in ws.rs (since this places orders from clients)
                             let (pair, trades) = matching_engine.place_limit_order(
                                 trading_pair.clone(),
@@ -601,7 +602,7 @@ async fn check_and_publish_price_change(
         previous_best.insert(trading_pair.clone(), new_price);
         drop(previous_best);
 
-        let topic = format!("{}_deribit_best_{}_change", trading_pair.clone().to_string(), side.trim_end_matches('s'));
+        let topic = format!("best_{}_change.deribit.{}", side.trim_end_matches('s'), trading_pair.clone().to_string());
         let message = json!({
             "side": side.trim_end_matches('s'),
             "price": new_price
