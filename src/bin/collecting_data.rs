@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
+
+use std::collections::HashMap;
 use std::fmt::format;
 use std::str::FromStr;
 use futures_util::{StreamExt, SinkExt};
@@ -66,6 +68,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let exchange = "deribit".to_string();
     let trading_pairs = ["BTC_USDT".to_string(), "BTC-PERPETUAL".to_string()];
+
+    // create a hashmap for all trading pairs to keep track of the best bid/ask price
+    let mut best_price_data: HashMap<String, BestAskAndBidData> = HashMap::new();
+    for trading_pair in &trading_pairs {
+        best_price_data.insert(trading_pair.clone(), BestAskAndBidData::new());
+    }
     // Subscribe to the BTC_USDT pair on best_bid_change
     let mut topics: Vec<String> = vec![];
     for trading_pair in trading_pairs {
@@ -108,10 +116,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ws_stream.send(Message::text("ping")).await.unwrap();
         println!("Message send to the server");
 
-        let price_update_table_name = "MICRO_SEC_DB.DERIBIT_BTC_USDT_AND_DERIBIT_BTC_PERPETUAL_BEST_PRICES";
-        let trade_update_table_name = "MICRO_SEC_DB.DERIBIT_BTC_USDT_AND_DERIBIT_BTC_PERPETUAL_TRADES";
+        let price_update_table_name = "MICRO_SEC_DB.DERIBIT_BTC_USDT_AND_DERIBIT_BTC_PERPETUAL_BEST_PRICES2";
+        let trade_update_table_name = "MICRO_SEC_DB.DERIBIT_BTC_USDT_AND_DERIBIT_BTC_PERPETUAL_TRADES2";
         let taos = build_taos_ws().await.unwrap();
-        let mut best_price_data = BestAskAndBidData::new();
+
         // Receive messages from the WebSocket server
         while let Some(message) = ws_stream.next().await {
             match message {
@@ -127,22 +135,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                     // println!("Parsed message: {:?}", &best_price_update);
                                                     let new_best_price = f32::from_str(&best_price_update.price).unwrap();
                                                     let side = best_price_update.side.clone();
-                                                    match side.as_str() {
-                                                        "ask" => { best_price_data.best_ask_price = Some(new_best_price); },
-                                                        "bid" => { best_price_data.best_bid_price = Some(new_best_price); },
-                                                        _ => eprintln!("Side is not bid or ask!")
-                                                    }
-                                                    if let (Some(best_ask_p), Some(best_bid_p)) = (best_price_data.best_ask_price, best_price_data.best_bid_price) {
-                                                        let sql = format!(
-                                                            "INSERT INTO {} (time, instrument, best_ask_price, best_bid_price) VALUES (NOW, '{}', {}, {});",
-                                                            price_update_table_name,
-                                                            trading_pair,
-                                                            best_ask_p,
-                                                            best_bid_p
-                                                        );
-                                                        taos.exec(sql).await?;
-                                                        // println!("Executed the inserting of price data");
-                                                    }
+                                                    if let Some(data) = best_price_data.get_mut(trading_pair) {
+                                                        match side.as_str() {
+                                                            "ask" => { data.best_ask_price = Some(new_best_price); },
+                                                            "bid" => { data.best_bid_price = Some(new_best_price); },
+                                                            _ => eprintln!("Side is not bid or ask!")
+                                                        }
+                                                        if let (Some(best_ask_p), Some(best_bid_p)) =
+                                                            (data.best_ask_price, data.best_bid_price) {
+                                                            let sql = format!(
+                                                                "INSERT INTO {} (time, instrument, best_ask_price, best_bid_price) VALUES (NOW, '{}', {}, {});",
+                                                                price_update_table_name,
+                                                                trading_pair,
+                                                                best_ask_p,
+                                                                best_bid_p
+                                                            );
+                                                            taos.exec(sql).await?;
+                                                            // println!("Executed the inserting of price data");
+                                                        }
+                                                    } else { eprintln!("Trading pair not found!"); }
                                                 },
                                                 Err(e) => println!("Failed to parse message content into price update data: {:?}", e),
                                             }
