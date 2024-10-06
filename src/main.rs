@@ -57,9 +57,6 @@ async fn main() {
     // Create an oneshot-channel for signaling server readiness
     let (tx, rx) = oneshot::channel();
 
-    // Initialize a hashmap for keeping track of the update counter for each topic that is subscribed to
-    let topic_counters: HashMap<String, u32> = HashMap::new();
-
     // Spawn the Deribit connection handling
     let deribit_engine = engine.clone();
     let deribit_traders_data = traders_data.clone();
@@ -87,7 +84,7 @@ async fn main() {
     });
 
     // Start the warp websocket
-    create_server::start_server(tx, engine.clone(), traders_data.clone(), topic_counters.clone()).await;
+    create_server::start_server(tx, engine.clone(), traders_data.clone()).await;
 }
 
 

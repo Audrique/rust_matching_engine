@@ -14,9 +14,10 @@ fn with_clients(clients: Clients) -> impl Filter<Extract = (Clients,), Error = I
 
 pub async fn start_server(tx: oneshot::Sender<()>,
                           matching_engine: Arc<TokioMutex<MatchingEngine>>,
-                          traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>,
-                          topic_counters: HashMap<String, u32>) {
+                          traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>) {
     let clients: Clients = Arc::new(RwLock::new(HashMap::new()));
+    let topic_counters: Arc<RwLock<HashMap<String, u32>>> = Arc::new(RwLock::new(HashMap::new()));
+
     let health_route = warp::path!("health").and_then(handler::health_handler);
 
     let register = warp::path("register");

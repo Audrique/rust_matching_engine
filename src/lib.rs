@@ -16,13 +16,14 @@ pub struct EngineData {
     pub message: String,
     pub topic: String,
     pub user_id: u32,
-    pub topic_counters: u32,
+    pub update_counter: u32,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct BestPriceUpdate {
-    pub price: String,
-    pub side: String,
+    pub best_bid_price: String,
+    pub best_ask_price: String,
+    pub changed_side: String,
 }
 
 pub async fn place_limit_order(trading_pair_base: &str,

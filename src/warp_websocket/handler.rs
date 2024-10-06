@@ -7,7 +7,7 @@ use serde_json::json;
 use uuid::Uuid;
 use warp::{http::StatusCode, reply::json, ws::Message, Reply};
 use crate::matching_engine::engine::MatchingEngine;
-use tokio::sync::Mutex as TokioMutex;
+use tokio::sync::{Mutex as TokioMutex, RwLock};
 use crate::connecting_to_exchanges::for_all_exchanges::TraderData;
 
 #[derive(Deserialize, Debug)]
@@ -47,8 +47,9 @@ impl Event {
 
 pub async fn publish_handler(body: Event,
                              clients: Clients,
-                             mut topic_counters: HashMap<String, u32>) -> Result<impl Reply> {
-    let counter = topic_counters.entry(body.topic.clone()).or_insert(0);
+                             topic_counters: Arc<RwLock<HashMap<String, u32>>>) -> Result<impl Reply> {
+    let mut counters = topic_counters.write().await;
+    let counter = counters.entry(body.topic.clone()).or_insert(0);
     clients
         .read()
         .await
