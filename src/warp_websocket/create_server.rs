@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
-use tokio::sync::{oneshot, RwLock, Mutex as TokioMutex};
+use tokio::sync::{oneshot, RwLock, Mutex as TokioMutex, Mutex};
 use warp::Filter;
 use crate::warp_websocket::{handler, handler::TopicActionRequest};
 use crate::{Clients};
@@ -14,7 +14,8 @@ fn with_clients(clients: Clients) -> impl Filter<Extract = (Clients,), Error = I
 
 pub async fn start_server(tx: oneshot::Sender<()>,
                           matching_engine: Arc<TokioMutex<MatchingEngine>>,
-                          traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>) {
+                          traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>,
+                          topic_counters: HashMap<String, u32>) {
     let clients: Clients = Arc::new(RwLock::new(HashMap::new()));
     let health_route = warp::path!("health").and_then(handler::health_handler);
 
@@ -34,6 +35,7 @@ pub async fn start_server(tx: oneshot::Sender<()>,
     let publish = warp::path!("publish")
         .and(warp::body::json())
         .and(with_clients(clients.clone()))
+        .and(warp::any().map(move || topic_counters.clone()))
         .and_then(handler::publish_handler);
 
     let ws_route = warp::path("ws")

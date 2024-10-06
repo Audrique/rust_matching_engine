@@ -45,7 +45,10 @@ impl Event {
     }
 }
 
-pub async fn publish_handler(body: Event, clients: Clients) -> Result<impl Reply> {
+pub async fn publish_handler(body: Event,
+                             clients: Clients,
+                             mut topic_counters: HashMap<String, u32>) -> Result<impl Reply> {
+    let counter = topic_counters.entry(body.topic.clone()).or_insert(0);
     clients
         .read()
         .await
@@ -56,13 +59,16 @@ pub async fn publish_handler(body: Event, clients: Clients) -> Result<impl Reply
         })
         .filter(|(_, client)| client.topics.contains(&body.topic))
         .for_each(|(_, client)| {
-            let json_message = json!({ "topic": body.topic, "user_id": body.user_id, "message": body.message });
             if let Some(sender) = &client.sender {
+                let json_message = json!({ "topic": body.topic,
+                    "user_id": body.user_id,
+                    "update_counter": *counter,
+                    "message": body.message });
                 let _ = sender.send(Ok(Message::text(json_message.to_string())));
+
             }
         });
-
-
+    *counter += 1;
     Ok(StatusCode::OK)
 }
 

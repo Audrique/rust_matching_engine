@@ -16,6 +16,7 @@ pub struct EngineData {
     pub message: String,
     pub topic: String,
     pub user_id: u32,
+    pub topic_counters: u32,
 }
 
 #[derive(Debug, Deserialize)]
