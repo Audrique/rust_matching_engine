@@ -180,11 +180,9 @@ fn initialize_on_hold_changes(trading_pairs: Vec<TradingPair>,
     Arc::new(TokioMutex::new(outer_map))
 }
 
-//TODO: change this a bit since we are now changing the best_price_change
 
 // deribit can change to exchange later when we add other exchanges
-// Topics: best_bid_change.{deribit}.{pair}, sends the best bid price if it changes (volume could be included later)
-//         best_ask_change.{deribit}.{pair}, sends the best ask price if it changes (idem as above)
+// Topics: best_price_change.{deribit}.{pair}, sends the best bid and ask price if one of them changes (volume could be included later)
 //         top_10_asks_bids_periodically.{deribit}.{pair}, sends the top 10 bids and asks every 250ms (prices and volume)
 //         trades.{deribit}.{pair}, sends trades that happen for the given exchange and trading_pair
 //         traders_data_periodically, sends all connected traders positions and trading_profit every 250ms
