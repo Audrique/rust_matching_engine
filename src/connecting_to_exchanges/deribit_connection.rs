@@ -19,8 +19,24 @@ use crate::matching_engine::{engine::{MatchingEngine, TradingPair},
                              orderbook::{Order, BidOrAsk, Trade, BuyOrSell}};
 use crate::warp_websocket::handler::{Event};
 use crate::connecting_to_exchanges::for_all_exchanges::{TraderData, update_trader_data};
+use rust_decimal_macros::dec;
 
 // TODO: refactor error handling (make it with '?' and Box< dyn std::error:Error>)
+
+#[derive(Debug, Clone)]
+struct BestPriceData {
+    best_ask_price: Decimal,
+    best_bid_price: Decimal,
+}
+
+impl BestPriceData {
+    fn new(best_ask_price: Decimal, best_bid_price: Decimal) -> BestPriceData {
+        BestPriceData {
+            best_ask_price,
+            best_bid_price,
+        }
+    }
+}
 
 fn make_trading_pair_type(input_from_deribit: &String) -> TradingPair {
     let parts: Vec<&str> = input_from_deribit.split('.').collect();
@@ -164,7 +180,9 @@ fn initialize_on_hold_changes(trading_pairs: Vec<TradingPair>,
     Arc::new(TokioMutex::new(outer_map))
 }
 
-// deribit can change to exchange later
+//TODO: change this a bit since we are now changing the best_price_change
+
+// deribit can change to exchange later when we add other exchanges
 // Topics: best_bid_change.{deribit}.{pair}, sends the best bid price if it changes (volume could be included later)
 //         best_ask_change.{deribit}.{pair}, sends the best ask price if it changes (idem as above)
 //         top_10_asks_bids_periodically.{deribit}.{pair}, sends the top 10 bids and asks every 250ms (prices and volume)
@@ -176,8 +194,7 @@ pub async fn on_incoming_deribit_message(
     trading_pairs: Vec<TradingPair>,
     traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>,
 ) {
-    let previous_best_bids: Arc<TokioMutex<HashMap<TradingPair, Decimal>>> = Arc::new(TokioMutex::new(HashMap::new()));
-    let previous_best_asks: Arc<TokioMutex<HashMap<TradingPair, Decimal>>> = Arc::new(TokioMutex::new(HashMap::new()));
+    let previous_best_prices: Arc<TokioMutex<HashMap<TradingPair, BestPriceData>>> = Arc::new(TokioMutex::new(HashMap::new()));
     let on_hold_changes = initialize_on_hold_changes(trading_pairs.clone());
     let publish_client = Arc::new(Client::new());
     let mut previous_change_ids: HashMap<String, u64> = HashMap::new();
@@ -252,8 +269,7 @@ pub async fn on_incoming_deribit_message(
                         .expect("No part before the first '.'");
                     match channel {
                         "book" => {
-                            let previous_best_bids = Arc::clone(&previous_best_bids);
-                            let previous_best_asks = Arc::clone(&previous_best_asks);
+                            let previous_best_prices = Arc::clone(&previous_best_prices);
                             let matching_engine = Arc::clone(&matching_engine);
                             let publish_client = Arc::clone(&publish_client);
                             let on_hold_changes = Arc::clone(&on_hold_changes);
@@ -264,8 +280,7 @@ pub async fn on_incoming_deribit_message(
                                 if let Err(e) = process_message(
                                     msg,
                                     matching_engine,
-                                    previous_best_bids,
-                                    previous_best_asks,
+                                    previous_best_prices,
                                     publish_client,
                                     on_hold_changes,
                                     traders_data_cloned
@@ -480,8 +495,7 @@ async fn publish_message(msg: String, topic: String, client: &Client) -> Result<
 async fn process_message(
     msg: Value,
     matching_engine: Arc<TokioMutex<MatchingEngine>>,
-    previous_best_bids: Arc<TokioMutex<HashMap<TradingPair, Decimal>>>,
-    previous_best_asks: Arc<TokioMutex<HashMap<TradingPair, Decimal>>>,
+    previous_best_prices: Arc<TokioMutex<HashMap<TradingPair, BestPriceData>>>,
     publish_client: Arc<Client>,
     on_hold_changes: Arc<TokioMutex<HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, (f64, Instant)>>>>>,
     traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>
@@ -494,7 +508,7 @@ async fn process_message(
         BidOrAsk::Ask,
         &trading_pair,
         matching_engine.clone(),
-        previous_best_asks,
+        previous_best_prices.clone(),
         publish_client.clone(),
         on_hold_changes.clone(),
         traders_data.clone()
@@ -505,7 +519,7 @@ async fn process_message(
         BidOrAsk::Bid,
         &trading_pair,
         matching_engine,
-        previous_best_bids,
+        previous_best_prices,
         publish_client,
         on_hold_changes,
         traders_data
@@ -529,7 +543,7 @@ async fn process_order_updates(
     bid_or_ask: BidOrAsk,
     trading_pair: &TradingPair,
     matching_engine: Arc<TokioMutex<MatchingEngine>>,
-    previous_best_prices: Arc<TokioMutex<HashMap<TradingPair, Decimal>>>,
+    previous_best_prices: Arc<TokioMutex<HashMap<TradingPair, BestPriceData>>>,
     publish_client: Arc<Client>,
     on_hold_changes: Arc<TokioMutex<HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, (f64, Instant)>>>>>,
     traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>,
@@ -589,26 +603,56 @@ async fn update_orders_and_get_best_price(
 async fn check_and_publish_price_change(
     new_price: Decimal,
     trading_pair: &TradingPair,
-    previous_best_prices: Arc<TokioMutex<HashMap<TradingPair, Decimal>>>,
+    previous_best_prices: Arc<TokioMutex<HashMap<TradingPair, BestPriceData>>>,
     publish_client: Arc<Client>,
     side: &str,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut previous_best = previous_best_prices.lock().await;
-    let price_changed = previous_best
-        .get(trading_pair)
-        .map_or(true, |prev| (new_price - prev).abs() > Decimal::new(1, 4));
+
+    let price_changed = match side {
+        "bids" => previous_best
+            .get(trading_pair)
+            .map_or(true, |prev| (new_price - prev.best_bid_price).abs() > Decimal::new(1, 4)),
+        "asks" => previous_best
+            .get(trading_pair)
+            .map_or(true, |prev| (new_price - prev.best_ask_price).abs() > Decimal::new(1, 4)),
+        _ => {
+            println!("Found unexpected side: {}", side);
+            false
+        }
+    };
 
     if price_changed {
-        previous_best.insert(trading_pair.clone(), new_price);
+        // Get existing data or create new BestPriceData
+        let mut best_price_data = previous_best
+            .get(trading_pair)
+            .cloned()
+            .unwrap_or_else(|| BestPriceData::new(dec!(0.0), dec!(0.0)));
+
+        // Update the appropriate price based on side
+        match side {
+            "bids" => best_price_data.best_bid_price = new_price,
+            "asks" => best_price_data.best_ask_price = new_price,
+            _ => {} // Already handled above
+        }
+
+        // Insert updated data
+        previous_best.insert(trading_pair.clone(), best_price_data.clone());
+
+        // Prepare and publish message
+        let topic = format!("best_price_change.deribit.{}", trading_pair.clone().to_string());
+        let message = json!({
+            "changed_side": side.trim_end_matches('s'),
+            "best_ask_price": best_price_data.best_ask_price,
+            "best_bid_price": best_price_data.best_bid_price
+        }).to_string();
+
+        // Drop the lock before publishing
         drop(previous_best);
 
-        let topic = format!("best_{}_change.deribit.{}", side.trim_end_matches('s'), trading_pair.clone().to_string());
-        let message = json!({
-            "side": side.trim_end_matches('s'),
-            "price": new_price
-        }).to_string();
         publish_message(message.clone(), topic, &publish_client).await?;
-        println!("For {:?} published {}", trading_pair.clone(), message);
+        println!("For {:?} published {}", trading_pair, message);
     }
+
     Ok(())
 }
