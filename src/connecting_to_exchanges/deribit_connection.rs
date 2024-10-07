@@ -19,9 +19,27 @@ use crate::matching_engine::{engine::{MatchingEngine, TradingPair},
                              orderbook::{Order, BidOrAsk, Trade, BuyOrSell}};
 use crate::warp_websocket::handler::{Event};
 use crate::connecting_to_exchanges::for_all_exchanges::{TraderData, update_trader_data};
+use crate::connecting_to_exchanges::parse_book_message::{BookUpdate, OrderBookEntry};
 use rust_decimal_macros::dec;
-
+use serde::Serialize;
 // TODO: refactor error handling (make it with '?' and Box< dyn std::error:Error>)
+
+#[derive(Debug, Clone, Serialize)]
+pub enum ChangedSide {
+    Ask,
+    Bid,
+    Both,
+}
+
+impl ChangedSide {
+    pub fn to_string(&self) -> String {
+        match self {
+            ChangedSide::Ask => "Ask".to_string(),
+            ChangedSide::Bid => "Bid".to_string(),
+            ChangedSide::Both => "Both".to_string(),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 struct BestPriceData {
@@ -36,6 +54,11 @@ impl BestPriceData {
             best_bid_price,
         }
     }
+}
+
+fn parse_book_update(msg: Value) -> Result<BookUpdate, serde_json::Error> {
+    let book_update: BookUpdate = serde_json::from_value(msg)?;
+    Ok(book_update)
 }
 
 fn make_trading_pair_type(input_from_deribit: &String) -> TradingPair {
@@ -361,110 +384,41 @@ pub async fn on_incoming_deribit_message(
 
 // TODO: put the arc mutex in here instead of the engine so we can have
 //  the least amount of locking we can
-async fn place_orders(update: &Vec<Value>,
-                bid_or_ask: BidOrAsk,
-                trading_pair: TradingPair,
+
+//TODO: make a struct that correctly parses the data, do this immediately when we receive the update, so we should change a lot probably
+// I think this might be causing an issue
+async fn place_orders(parsed_data: BookUpdate,
                 matching_engine: &mut MatchingEngine,
                 on_hold_changes: &mut HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, (f64, Instant)>>>,
                 time_until_forget_on_hold: Duration,
                 traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>
 ) {
-    for price_level in update {
-        if let Some(Value::String(type_of_update)) = &price_level.get(0) {
-            if let Some(Value::Number(price)) = &price_level.get(1) {
-                let price = Decimal::from_f64(price.as_f64().unwrap()).unwrap();
-                let check_exchange_order_in_orderbook = match bid_or_ask {
-                    BidOrAsk::Ask => {matching_engine
-                        .orderbooks
-                        .get(&trading_pair).unwrap()
-                        .asks.get(&price).map_or(false, |limit| {
-                        limit.check_exchange_order_in_limit()
-                        })
-                    },
-                    BidOrAsk::Bid => {matching_engine
-                        .orderbooks
-                        .get(&trading_pair).unwrap()
-                        .bids.get(&price).map_or(false, |limit| {
-                        limit.check_exchange_order_in_limit()
-                        })
-                    }
-                };
-                if let Some(Value::Number(volume)) = &price_level.get(2){
-                    let volume = volume.as_f64().unwrap();
-                    match type_of_update.as_str() {
-                        "delete" => {
-                            if check_exchange_order_in_orderbook {
-                                matching_engine.leave_volume_from_exchange(
-                                    trading_pair.clone(),
-                                    bid_or_ask.clone(),
-                                    price,
-                                    volume // In this case the volume is always 0.0 -> maybe change it? or keep it as an extra 'check'
-                                ).unwrap();
-                            } else {on_hold_changes
-                                .get_mut(&trading_pair)
-                                .unwrap()
-                                .get_mut(&bid_or_ask)
-                                .unwrap()
-                                .insert(price, (volume, Instant::now()));}
-                        },
-                        "new" => {
-                            // TODO: publish the trades at the correct topic 'trades.{deribit}.{pair}
-                            //  Also, in the client_msg function in ws.rs (since this places orders from clients)
-                            let (pair, trades) = matching_engine.place_limit_order(
-                                trading_pair.clone(),
-                                price.clone(),
-                                Order::new(bid_or_ask.clone(),
-                                           volume,
-                                           "deribit-exchange".to_string(),
-                                           "-1".to_string())
-                            ).unwrap();
-                            update_trader_data(pair, trades, traders_data.clone()).await;
+    let trading_pair = parsed_data.trading_pair.clone();
 
-                            let volume_on_hold = on_hold_changes.
-                                get_mut(&trading_pair)
-                                .unwrap()
-                                .get_mut(&bid_or_ask)
-                                .unwrap()
-                                .get(&price)
-                                .map(|&(vol, _)| vol)
-                                .unwrap_or(-999.0);
-
-                            if volume_on_hold >= 0.0 {
-                                matching_engine.leave_volume_from_exchange(
-                                    trading_pair.clone(),
-                                    bid_or_ask.clone(),
-                                    price.clone(),
-                                    volume_on_hold
-                                ).unwrap();
-                                on_hold_changes
-                                    .get_mut(&trading_pair)
-                                    .unwrap()
-                                    .get_mut(&bid_or_ask)
-                                    .unwrap()
-                                    .remove(&price);
-                            }
-                        },
-                        "change" => {
-                            if check_exchange_order_in_orderbook {
-                                matching_engine.leave_volume_from_exchange(
-                                    trading_pair.clone(),
-                                    bid_or_ask.clone(),
-                                    price,
-                                    volume
-                                ).unwrap();
-                            } {on_hold_changes
-                                .get_mut(&trading_pair)
-                                .unwrap()
-                                .get_mut(&bid_or_ask)
-                                .unwrap()
-                                .insert(price, (volume, Instant::now()));}
-                        },
-                        _ => {eprintln!("Update-type not one of 'change', 'new' or 'delete'! ")}
-                    }
-                }
-            }
-        }
+    // Process asks
+    for entry in parsed_data.asks {
+        process_order_entry(
+            entry,
+            BidOrAsk::Ask,
+            &trading_pair,
+            matching_engine,
+            on_hold_changes,
+            traders_data.clone(),
+        ).await;
     }
+
+    // Process bids
+    for entry in parsed_data.bids {
+        process_order_entry(
+            entry,
+            BidOrAsk::Bid,
+            &trading_pair,
+            matching_engine,
+            on_hold_changes,
+            traders_data.clone(),
+        ).await;
+    }
+
     // Clean up on_hold_change
     let cleanup_time = Instant::now();
     for (_, bid_ask_map) in on_hold_changes.iter_mut() {
@@ -473,6 +427,109 @@ async fn place_orders(update: &Vec<Value>,
         }
     }
     // println!("{:?}", on_hold_changes);
+}
+
+async fn process_order_entry(
+    entry: OrderBookEntry,
+    bid_or_ask: BidOrAsk,
+    trading_pair: &TradingPair,
+    matching_engine: &mut MatchingEngine,
+    on_hold_changes: &mut HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, (f64, Instant)>>>,
+    traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>
+) {
+    let price = Decimal::from_f64(entry.price).unwrap();
+    let volume = entry.volume;
+
+    let check_exchange_order_in_orderbook = match bid_or_ask {
+        BidOrAsk::Ask => matching_engine
+            .orderbooks
+            .get(trading_pair)
+            .unwrap()
+            .asks
+            .get(&price)
+            .map_or(false, |limit| limit.check_exchange_order_in_limit()),
+        BidOrAsk::Bid => matching_engine
+            .orderbooks
+            .get(trading_pair)
+            .unwrap()
+            .bids
+            .get(&price)
+            .map_or(false, |limit| limit.check_exchange_order_in_limit()),
+    };
+
+    match entry.action.as_str() {
+        "delete" => {
+            if check_exchange_order_in_orderbook {
+                matching_engine.leave_volume_from_exchange(
+                    trading_pair.clone(),
+                    bid_or_ask.clone(),
+                    price,
+                    volume // In this case the volume is always 0.0 -> maybe change it? or keep it as an extra 'check'
+                ).unwrap();
+            } else {
+                on_hold_changes
+                    .get_mut(trading_pair)
+                    .unwrap()
+                    .get_mut(&bid_or_ask)
+                    .unwrap()
+                    .insert(price, (volume, Instant::now()));
+            }
+        },
+        "new" => {
+            let (pair, trades) = matching_engine.place_limit_order(
+                trading_pair.clone(),
+                price,
+                Order::new(
+                    bid_or_ask.clone(),
+                    volume,
+                    "deribit-exchange".to_string(),
+                    "-1".to_string()
+                )
+            ).unwrap();
+            update_trader_data(pair, trades, traders_data.clone()).await;
+
+            let volume_on_hold = on_hold_changes
+                .get_mut(trading_pair)
+                .unwrap()
+                .get_mut(&bid_or_ask)
+                .unwrap()
+                .get(&price)
+                .map(|&(vol, _)| vol)
+                .unwrap_or(-999.0);
+
+            if volume_on_hold >= 0.0 {
+                matching_engine.leave_volume_from_exchange(
+                    trading_pair.clone(),
+                    bid_or_ask.clone(),
+                    price,
+                    volume_on_hold
+                ).unwrap();
+                on_hold_changes
+                    .get_mut(trading_pair)
+                    .unwrap()
+                    .get_mut(&bid_or_ask)
+                    .unwrap()
+                    .remove(&price);
+            }
+        },
+        "change" => {
+            if check_exchange_order_in_orderbook {
+                matching_engine.leave_volume_from_exchange(
+                    trading_pair.clone(),
+                    bid_or_ask.clone(),
+                    price,
+                    volume
+                ).unwrap();
+            }
+            on_hold_changes
+                .get_mut(trading_pair)
+                .unwrap()
+                .get_mut(&bid_or_ask)
+                .unwrap()
+                .insert(price, (volume, Instant::now()));
+        },
+        _ => eprintln!("Update-type not one of 'change', 'new' or 'delete'!")
+    }
 }
 
 async fn publish_message(msg: String, topic: String, client: &Client) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -499,28 +556,16 @@ async fn process_message(
     traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
 
-    let (trading_pair, data) = extract_trading_pair_and_data(&msg)?;
+    let data = msg["params"]["data"].clone();
+    let parsed_update = parse_book_update(data.clone())?;
+
     process_order_updates(
-        &data,
-        "asks",
-        BidOrAsk::Ask,
-        &trading_pair,
+        parsed_update,
         matching_engine.clone(),
         previous_best_prices.clone(),
         publish_client.clone(),
         on_hold_changes.clone(),
         traders_data.clone()
-    ).await?;
-    process_order_updates(
-        &data,
-        "bids",
-        BidOrAsk::Bid,
-        &trading_pair,
-        matching_engine,
-        previous_best_prices,
-        publish_client,
-        on_hold_changes,
-        traders_data
     ).await?;
     Ok(())
 }
@@ -536,64 +581,60 @@ fn extract_trading_pair_and_data(parsed: &Value) -> Result<(TradingPair, &Value)
 }
 
 async fn process_order_updates(
-    data: &Value,
-    side: &str,
-    bid_or_ask: BidOrAsk,
-    trading_pair: &TradingPair,
+    parsed_data: BookUpdate,
     matching_engine: Arc<TokioMutex<MatchingEngine>>,
     previous_best_prices: Arc<TokioMutex<HashMap<TradingPair, BestPriceData>>>,
     publish_client: Arc<Client>,
     on_hold_changes: Arc<TokioMutex<HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, (f64, Instant)>>>>>,
     traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    // TODO? maybe change this such that the updates is still of type Value and we can access the elements by the 'key'
-    if let Some(Value::Array(updates)) = data.get(side) {
-        if !updates.is_empty() {
-            let (best_ask_price, best_bid_price) = update_orders_and_get_best_price(
-                updates,
-                bid_or_ask,
-                trading_pair,
-                matching_engine,
-                on_hold_changes,
-                traders_data
-            ).await?;
 
-            check_and_publish_price_change(
-                best_ask_price,
-                best_bid_price,
-                trading_pair,
-                previous_best_prices,
-                publish_client,
-                side,
-            ).await?;
-        }
-    }
+    let trading_pair = &parsed_data.trading_pair.clone();
+    // TODO? maybe change this such that the updates is still of type Value and we can access the elements by the 'key'
+    let (best_ask_price, best_bid_price) = update_orders_and_get_best_price(
+        parsed_data,
+        matching_engine,
+        on_hold_changes,
+        traders_data
+    ).await?;
+
+    check_and_publish_price_change(
+        best_ask_price,
+        best_bid_price,
+        trading_pair,
+        previous_best_prices,
+        publish_client,
+    ).await?;
+
+
     Ok(())
 }
 
 // TODO: check more about the 'No orders found'. Since I added the trade subscription I get this message in the beginning.
 //  Check if the orderbook is still correct with the deribit orderbooks
 async fn update_orders_and_get_best_price(
-    updates: &Vec<Value>,
-    bid_or_ask: BidOrAsk,
-    trading_pair: &TradingPair,
+    parsed_data: BookUpdate,
     matching_engine: Arc<TokioMutex<MatchingEngine>>,
     on_hold_changes: Arc<TokioMutex<HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, (f64, Instant)>>>>>,
     traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>,
 ) -> Result<(Decimal, Decimal), Box<dyn Error + Send + Sync>> {
     let mut engine = matching_engine.lock().await;
     let mut on_hold_changes_ = on_hold_changes.lock().await;
-    place_orders(updates,
-                 bid_or_ask.clone(),
-                 trading_pair.clone(),
+
+    place_orders(parsed_data.clone(),
                  &mut engine,
                  &mut on_hold_changes_,
                  Duration::from_millis(200), // TODO: Play with this value to make sure we keep the correct orderbook and look if we publish wrong things
                  traders_data).await;
-    let orderbook = engine.orderbooks.get(trading_pair).ok_or("Orderbook not found")?;
+    let orderbook = engine.orderbooks.get(&parsed_data.trading_pair).ok_or("Orderbook not found")?;
 
     let (best_ask_price, _) = orderbook.asks.first_key_value().ok_or("No orders found for asks")?;
     let (best_bid_price, _) = orderbook.bids.last_key_value().ok_or("No orders found for bids")?;
+    let spread = best_ask_price - best_bid_price;
+    if spread <= dec!(0.0) {
+        println!("The updates: {:?}", parsed_data);
+        println!("The spread is: {:?}", spread);
+    }
     Ok((best_ask_price.clone(), best_bid_price.clone()))
 }
 
@@ -602,8 +643,7 @@ async fn check_and_publish_price_change(
     new_best_bid_price: Decimal,
     trading_pair: &TradingPair,
     previous_best_prices: Arc<TokioMutex<HashMap<TradingPair, BestPriceData>>>,
-    publish_client: Arc<Client>,
-    side: &str,
+    publish_client: Arc<Client>
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut previous_best = previous_best_prices.lock().await;
 
@@ -623,6 +663,14 @@ async fn check_and_publish_price_change(
             .unwrap_or_else(|| BestPriceData::new(dec!(0.0), dec!(0.0)));
         best_price_data.best_bid_price = new_best_bid_price;
         best_price_data.best_ask_price = new_best_ask_price;
+        let mut changed_side = ChangedSide::Ask;
+        if best_bid_changed {
+            if best_ask_changed {
+                changed_side = ChangedSide::Both;
+            } else {
+                changed_side = ChangedSide::Bid;
+            }
+        }
 
 
         // Insert updated data
@@ -630,8 +678,10 @@ async fn check_and_publish_price_change(
 
         // Prepare and publish message
         let topic = format!("best_price_change.deribit.{}", trading_pair.clone().to_string());
+
+        // TODO: do the change side an enum: ask, bid or both (based on the above bools)
         let message = json!({
-            "changed_side": side.trim_end_matches('s'),
+            "changed_side": changed_side.to_string(),
             "best_ask_price": best_price_data.best_ask_price,
             "best_bid_price": best_price_data.best_bid_price
         }).to_string();

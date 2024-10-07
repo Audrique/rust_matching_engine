@@ -3,24 +3,24 @@ use serde_json::Value;
 use crate::matching_engine::engine::TradingPair;
 
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct BookUpdate {
-    asks: Vec<OrderBookEntry>,
-    bids: Vec<OrderBookEntry>,
-    change_id: u64,
+    pub asks: Vec<OrderBookEntry>,
+    pub bids: Vec<OrderBookEntry>,
+    pub change_id: u64,
     #[serde(rename = "instrument_name", deserialize_with = "deserialize_trading_pair")]
-    trading_pair: TradingPair,
-    prev_change_id: u64,
-    timestamp: u64,
+    pub trading_pair: TradingPair,
+    pub prev_change_id: u64,
+    pub timestamp: u64,
     #[serde(rename = "type")]
-    update_type: String,
+    pub update_type: String,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct OrderBookEntry {
-    action: String,
-    price: f64,
-    volume: f64,
+    pub action: String,
+    pub price: f64,
+    pub volume: f64,
 }
 
 impl<'de> Deserialize<'de> for OrderBookEntry {
@@ -57,7 +57,7 @@ where
     D: Deserializer<'de>,
 {
     let instrument_name = String::deserialize(deserializer)?;
-    let base_and_quote: Vec<&str> = instrument_name.split('-').collect();
+    let base_and_quote: Vec<&str> = instrument_name.split('_').collect();
 
     Ok(TradingPair::new(
         base_and_quote.get(0).unwrap_or(&"").to_string(),
@@ -74,7 +74,7 @@ mod tests {
             "asks": [["delete", 62944.0, 0.0], ["new", 62949.0, 16500.0]],
             "bids": [["change", 62933.0, 7550.0]],
             "change_id": 78693046768,
-            "instrument_name": "BTC-PERPETUAL",
+            "instrument_name": "BTC_USDT",
             "prev_change_id": 78693046766,
             "timestamp": 1728299690099,
             "type": "change"
@@ -84,7 +84,7 @@ mod tests {
 
         // Test trading pair parsing
         assert_eq!(book_update.trading_pair.base, "BTC");
-        assert_eq!(book_update.trading_pair.quote, "PERPETUAL");
+        assert_eq!(book_update.trading_pair.quote, "USDT");
 
         // Test asks parsing
         assert_eq!(book_update.asks.len(), 2);
@@ -121,7 +121,7 @@ mod tests {
             "asks": [],
             "bids": [],
             "change_id": 78693046768,
-            "instrument_name": "ETH-BTC",
+            "instrument_name": "ETH-PERPETUAL",
             "prev_change_id": 78693046766,
             "timestamp": 1728299690099,
             "type": "change"
@@ -131,8 +131,8 @@ mod tests {
 
         assert!(book_update.asks.is_empty());
         assert!(book_update.bids.is_empty());
-        assert_eq!(book_update.trading_pair.base, "ETH");
-        assert_eq!(book_update.trading_pair.quote, "BTC");
+        assert_eq!(book_update.trading_pair.base, "ETH-PERPETUAL");
+        assert_eq!(book_update.trading_pair.quote, "");
     }
 
     #[test]
