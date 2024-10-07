@@ -25,9 +25,9 @@ async fn main() {
 
     let pair_string = "BTC_USDT".to_string();
     let exchange = "deribit".to_string();
-    // Subscribe to the BTC_USDT pair on best_bid_change
-    let topic_bid = format!("best_bid_change.{}.{}", exchange.clone(), pair_string.clone());
-    let register_request = json!({ "user_id": 1, "topic": topic_bid});
+    // Subscribe to the BTC_USDT pair on best_price_change
+    let best_price_topic = format!("best_price_change.{}.{}", exchange.clone(), pair_string.clone());
+    let register_request = json!({ "user_id": 1, "topic": best_price_topic});
 
     let response = http_client.post(register_url)
         .json(&register_request)  // Send as JSON
@@ -38,18 +38,18 @@ async fn main() {
     if response.status().is_success() {
         let register_response: RegisterResponse = response.json().await.expect("Failed to parse response");
         println!("Successfully registered client! WebSocket URL: {}", register_response.url);
-        // add the topic of the best ask
-        let add_topic_url = "http://127.0.0.1:8000/add_topic";
-        let topic_ask = format!("best_ask_change.{}.{}", exchange.clone(), pair_string.clone());
-        let client_id = register_response.url.split('/').last().unwrap_or("");
-        let add_topic_request = json!({"topic": topic_ask, "client_id": client_id});
-        let add_topic_response = http_client.post(add_topic_url)
-            .json(&add_topic_request)  // Send as JSON
-            .send()
-            .await
-            .expect("Failed to send request");
-        let add_topic_response2: String  = add_topic_response.text().await.expect("Failed to parse response");
-        println!("Successfully added a topic for the client: {}", add_topic_response2);
+        // // add the topic of the best ask
+        // let add_topic_url = "http://127.0.0.1:8000/add_topic";
+        // let topic_ask = format!("best_ask_change.{}.{}", exchange.clone(), pair_string.clone());
+        // let client_id = register_response.url.split('/').last().unwrap_or("");
+        // let add_topic_request = json!({"topic": topic_ask, "client_id": client_id});
+        // let add_topic_response = http_client.post(add_topic_url)
+        //     .json(&add_topic_request)  // Send as JSON
+        //     .send()
+        //     .await
+        //     .expect("Failed to send request");
+        // let add_topic_response2: String  = add_topic_response.text().await.expect("Failed to parse response");
+        // println!("Successfully added a topic for the client: {}", add_topic_response2);
 
         // Now we have a URL which we are registered with under register_response.url and can now get a websocket_connection
         let (mut ws_stream, _) = connect_async(register_response.url).await.expect("Failed to connect");
@@ -75,12 +75,13 @@ async fn main() {
                                                 println!("Parsed message: {:?}", &content);
                                                 // Only place bid orders for the moment since
                                                 // we do not keep track of our open orders and then we get negative spread
-                                                let new_best_price = f64::from_str(&content.price).unwrap();
-                                                let side = &content.side;
+                                                // Note that the changed side is not nessecarily the only side that was changed
+                                                // However, it is the side that 'caused' the change
+                                                let side = &content.changed_side;
 
                                                 let order_price = match side.as_str() {
-                                                    "bid" => new_best_price + 30.0,
-                                                    "ask" => new_best_price - 30.0,
+                                                    "bid" => { f64::from_str(&content.best_bid_price).unwrap() + 30.0 },
+                                                    "ask" => { f64::from_str(&content.best_ask_price).unwrap() - 30.0 },
                                                     _ => -1.0,
                                                 };
 
