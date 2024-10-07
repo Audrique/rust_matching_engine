@@ -28,8 +28,8 @@ impl Iterator for StringCounter {
 // BTCUSD => BTC is base and USD the quote
 #[derive(Debug, Eq, PartialEq, Hash, Clone, Serialize, Deserialize)]
 pub struct TradingPair {
-    base: String,
-    quote: String,
+    pub base: String,
+    pub quote: String,
 }
 
 impl TradingPair {
