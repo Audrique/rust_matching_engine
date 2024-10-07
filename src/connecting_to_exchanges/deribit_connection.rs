@@ -549,7 +549,7 @@ async fn process_order_updates(
     // TODO? maybe change this such that the updates is still of type Value and we can access the elements by the 'key'
     if let Some(Value::Array(updates)) = data.get(side) {
         if !updates.is_empty() {
-            let best_price = update_orders_and_get_best_price(
+            let (best_ask_price, best_bid_price) = update_orders_and_get_best_price(
                 updates,
                 bid_or_ask,
                 trading_pair,
@@ -559,7 +559,8 @@ async fn process_order_updates(
             ).await?;
 
             check_and_publish_price_change(
-                best_price,
+                best_ask_price,
+                best_bid_price,
                 trading_pair,
                 previous_best_prices,
                 publish_client,
@@ -579,7 +580,7 @@ async fn update_orders_and_get_best_price(
     matching_engine: Arc<TokioMutex<MatchingEngine>>,
     on_hold_changes: Arc<TokioMutex<HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, (f64, Instant)>>>>>,
     traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>,
-) -> Result<Decimal, Box<dyn Error + Send + Sync>> {
+) -> Result<(Decimal, Decimal), Box<dyn Error + Send + Sync>> {
     let mut engine = matching_engine.lock().await;
     let mut on_hold_changes_ = on_hold_changes.lock().await;
     place_orders(updates,
@@ -587,19 +588,18 @@ async fn update_orders_and_get_best_price(
                  trading_pair.clone(),
                  &mut engine,
                  &mut on_hold_changes_,
-                 Duration::from_secs(2),
+                 Duration::from_millis(200), // TODO: Play with this value to make sure we keep the correct orderbook and look if we publish wrong things
                  traders_data).await;
     let orderbook = engine.orderbooks.get(trading_pair).ok_or("Orderbook not found")?;
-    let (best_price, _) = match bid_or_ask {
-        BidOrAsk::Ask => orderbook.asks.first_key_value(),
-        BidOrAsk::Bid => orderbook.bids.last_key_value(),
-    }.ok_or("No orders found")?;
 
-    Ok(best_price.clone())
+    let (best_ask_price, _) = orderbook.asks.first_key_value().ok_or("No orders found for asks")?;
+    let (best_bid_price, _) = orderbook.bids.last_key_value().ok_or("No orders found for bids")?;
+    Ok((best_ask_price.clone(), best_bid_price.clone()))
 }
 
 async fn check_and_publish_price_change(
-    new_price: Decimal,
+    new_best_ask_price: Decimal,
+    new_best_bid_price: Decimal,
     trading_pair: &TradingPair,
     previous_best_prices: Arc<TokioMutex<HashMap<TradingPair, BestPriceData>>>,
     publish_client: Arc<Client>,
@@ -607,32 +607,23 @@ async fn check_and_publish_price_change(
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut previous_best = previous_best_prices.lock().await;
 
-    let price_changed = match side {
-        "bids" => previous_best
-            .get(trading_pair)
-            .map_or(true, |prev| (new_price - prev.best_bid_price).abs() > Decimal::new(1, 4)),
-        "asks" => previous_best
-            .get(trading_pair)
-            .map_or(true, |prev| (new_price - prev.best_ask_price).abs() > Decimal::new(1, 4)),
-        _ => {
-            println!("Found unexpected side: {}", side);
-            false
-        }
-    };
+    let best_bid_changed = previous_best
+        .get(trading_pair)
+        .map_or(true, |prev| (new_best_bid_price - prev.best_bid_price).abs() > Decimal::new(1, 4));
 
-    if price_changed {
+    let best_ask_changed = previous_best
+        .get(trading_pair)
+        .map_or(true, |prev| (new_best_ask_price - prev.best_ask_price).abs() > Decimal::new(1, 4));
+
+    if best_bid_changed || best_ask_changed {
         // Get existing data or create new BestPriceData
         let mut best_price_data = previous_best
             .get(trading_pair)
             .cloned()
             .unwrap_or_else(|| BestPriceData::new(dec!(0.0), dec!(0.0)));
+        best_price_data.best_bid_price = new_best_bid_price;
+        best_price_data.best_ask_price = new_best_ask_price;
 
-        // Update the appropriate price based on side
-        match side {
-            "bids" => best_price_data.best_bid_price = new_price,
-            "asks" => best_price_data.best_ask_price = new_price,
-            _ => {} // Already handled above
-        }
 
         // Insert updated data
         previous_best.insert(trading_pair.clone(), best_price_data.clone());
