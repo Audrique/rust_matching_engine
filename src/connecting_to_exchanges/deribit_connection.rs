@@ -385,8 +385,6 @@ pub async fn on_incoming_deribit_message(
 // TODO: put the arc mutex in here instead of the engine so we can have
 //  the least amount of locking we can
 
-//TODO: make a struct that correctly parses the data, do this immediately when we receive the update, so we should change a lot probably
-// I think this might be causing an issue
 async fn place_orders(parsed_data: BookUpdate,
                 matching_engine: &mut MatchingEngine,
                 on_hold_changes: &mut HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, (f64, Instant)>>>,
@@ -590,7 +588,6 @@ async fn process_order_updates(
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let trading_pair = &parsed_data.trading_pair.clone();
-    // TODO? maybe change this such that the updates is still of type Value and we can access the elements by the 'key'
     let (best_ask_price, best_bid_price) = update_orders_and_get_best_price(
         parsed_data,
         matching_engine,
@@ -679,7 +676,6 @@ async fn check_and_publish_price_change(
         // Prepare and publish message
         let topic = format!("best_price_change.deribit.{}", trading_pair.clone().to_string());
 
-        // TODO: do the change side an enum: ask, bid or both (based on the above bools)
         let message = json!({
             "changed_side": changed_side.to_string(),
             "best_ask_price": best_price_data.best_ask_price,
