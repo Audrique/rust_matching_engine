@@ -10,7 +10,6 @@ pub struct BookUpdate {
     pub change_id: u64,
     #[serde(rename = "instrument_name", deserialize_with = "deserialize_trading_pair")]
     pub trading_pair: TradingPair,
-    pub prev_change_id: u64,
     pub timestamp: u64,
     #[serde(rename = "type")]
     pub update_type: String,
@@ -74,8 +73,7 @@ mod tests {
             "asks": [["delete", 62944.0, 0.0], ["new", 62949.0, 16500.0]],
             "bids": [["change", 62933.0, 7550.0]],
             "change_id": 78693046768,
-            "instrument_name": "BTC_USDT",
-            "prev_change_id": 78693046766,
+            "instrument_name": "BTC_USDT"
             "timestamp": 1728299690099,
             "type": "change"
         }"#;
@@ -109,7 +107,6 @@ mod tests {
 
         // Test other fields
         assert_eq!(book_update.change_id, 78693046768);
-        assert_eq!(book_update.prev_change_id, 78693046766);
         assert_eq!(book_update.timestamp, 1728299690099);
         assert_eq!(book_update.update_type, "change");
         println!("{:?}", book_update);
@@ -121,8 +118,7 @@ mod tests {
             "asks": [],
             "bids": [],
             "change_id": 78693046768,
-            "instrument_name": "ETH-PERPETUAL",
-            "prev_change_id": 78693046766,
+            "instrument_name": "ETH-PERPETUAL"
             "timestamp": 1728299690099,
             "type": "change"
         }"#;
@@ -141,8 +137,7 @@ mod tests {
             "asks": [],
             "bids": [],
             "change_id": 78693046768,
-            "instrument_name": "INVALID",
-            "prev_change_id": 78693046766,
+            "instrument_name": "INVALID"
             "timestamp": 1728299690099,
             "type": "change"
         }"#;
@@ -159,8 +154,7 @@ mod tests {
             "asks": [["delete", "not_a_number", 0.0]],
             "bids": [],
             "change_id": 78693046768,
-            "instrument_name": "BTC-PERPETUAL",
-            "prev_change_id": 78693046766,
+            "instrument_name": "BTC-PERPETUAL"
             "timestamp": 1728299690099,
             "type": "change"
         }"#;
