@@ -319,7 +319,7 @@ impl Limit {
         while i < self.orders.len() {
             let limit_order = &mut self.orders[i];
 
-            if market_order.trader_id != limit_order.trader_id {
+            if (market_order.trader_id != limit_order.trader_id) || limit_order.trader_id.ends_with("exchange")  {
                 match market_order.size >= limit_order.size {
                     true => {
                         market_order.size -= limit_order.size;
