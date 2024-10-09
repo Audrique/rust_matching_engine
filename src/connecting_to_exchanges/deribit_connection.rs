@@ -324,6 +324,11 @@ pub async fn on_incoming_deribit_message(
                                     }
                                 }
                                 previous_change_ids.insert(channel, current_change_id.clone());
+                            } else {
+                                let update_type = data["params"]["data"]["type"].as_str().ok_or("No type in received data!").unwrap();
+                                if update_type == "snapshot" {
+                                    println!("Snapshot received!");
+                                }
                             }
                         },
                         "trades" => {
@@ -365,7 +370,7 @@ pub async fn on_incoming_deribit_message(
                                 "trades": trades,
                             }).to_string();
                             publish_message(message.clone(), topic, &publish_client).await.unwrap();
-                            println!("Published trades");
+                            // println!("Published trade");
                         },
                         _ => {eprintln!("Unexpected channel message!")}
                     }
@@ -380,10 +385,6 @@ pub async fn on_incoming_deribit_message(
     }
     periodic_publish_task.abort();
 }
-
-
-// TODO: put the arc mutex in here instead of the engine so we can have
-//  the least amount of locking we can
 
 async fn place_orders(parsed_data: BookUpdate,
                 matching_engine: &mut MatchingEngine,
@@ -424,7 +425,7 @@ async fn place_orders(parsed_data: BookUpdate,
             price_map.retain(|_, (_, timestamp)| cleanup_time.duration_since(*timestamp) <= time_until_forget_on_hold);
         }
     }
-    // println!("{:?}", on_hold_changes);
+    // println!("on hold: {:?}", on_hold_changes);
 }
 
 async fn process_order_entry(
@@ -556,7 +557,6 @@ async fn process_message(
 
     let data = msg["params"]["data"].clone();
     let parsed_update = parse_book_update(data.clone())?;
-
     process_order_updates(
         parsed_update,
         matching_engine.clone(),
@@ -566,16 +566,6 @@ async fn process_message(
         traders_data.clone()
     ).await?;
     Ok(())
-}
-
-fn extract_trading_pair_and_data(parsed: &Value) -> Result<(TradingPair, &Value), Box<dyn Error + Send + Sync>> {
-    let params = parsed.get("params").ok_or("Missing params")?;
-    let data = params.get("data").ok_or("Missing data")?;
-    let trading_pair_string = params.get("channel")
-        .and_then(Value::as_str)
-        .ok_or("Invalid channel")?.to_string();
-    let trading_pair = make_trading_pair_type(&trading_pair_string);
-    Ok((trading_pair, data))
 }
 
 async fn process_order_updates(
@@ -617,21 +607,21 @@ async fn update_orders_and_get_best_price(
 ) -> Result<(Decimal, Decimal), Box<dyn Error + Send + Sync>> {
     let mut engine = matching_engine.lock().await;
     let mut on_hold_changes_ = on_hold_changes.lock().await;
-
+    // if parsed_data.update_type == "snapshot".to_string() {
+    //     println!("SNAPSHOT!!");
+    // }
     place_orders(parsed_data.clone(),
                  &mut engine,
                  &mut on_hold_changes_,
                  Duration::from_millis(200), // TODO: Play with this value to make sure we keep the correct orderbook and look if we publish wrong things
                  traders_data).await;
     let orderbook = engine.orderbooks.get(&parsed_data.trading_pair).ok_or("Orderbook not found")?;
-
     let (best_ask_price, _) = orderbook.asks.first_key_value().ok_or("No orders found for asks")?;
     let (best_bid_price, _) = orderbook.bids.last_key_value().ok_or("No orders found for bids")?;
-    let spread = best_ask_price - best_bid_price;
-    if spread <= dec!(0.0) {
-        println!("The updates: {:?}", parsed_data);
-        println!("The spread is: {:?}", spread);
-    }
+    // let spread = best_ask_price - best_bid_price;
+    // if spread <= dec!(0.0) {
+    //     println!("The spread is negative: {:?}", spread);
+    // }
     Ok((best_ask_price.clone(), best_bid_price.clone()))
 }
 
@@ -681,12 +671,11 @@ async fn check_and_publish_price_change(
             "best_ask_price": best_price_data.best_ask_price,
             "best_bid_price": best_price_data.best_bid_price
         }).to_string();
-
-        // Drop the lock before publishing
-        drop(previous_best);
+        let spread = best_price_data.best_ask_price - best_price_data.best_bid_price;
 
         publish_message(message.clone(), topic, &publish_client).await?;
-        println!("For {:?} published {}", trading_pair, message);
+        drop(previous_best);
+        // println!("For {:?} published {}", trading_pair, message);
     }
 
     Ok(())
