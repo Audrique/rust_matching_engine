@@ -40,11 +40,11 @@ pub async fn update_trader_data(trading_pair: TradingPair,
         // Update taker's data
         let taker_data = traders_data.entry(taker_id.clone()).or_insert_with(|| TraderData::new(0.0));
         *taker_data.positions.entry(trading_pair.clone().to_string()).or_insert(0.0) += trade.volume;
-        taker_data.trading_profit -= trade_value + trade.taker_fee;
+        taker_data.trading_profit -= trade_value + trade.taker_fee*trade_value;
 
         // Update maker's data
         let maker_data = traders_data.entry(maker_id.clone()).or_insert_with(|| TraderData::new(0.0));
         *maker_data.positions.entry(trading_pair.clone().to_string()).or_insert(0.0) -= trade.volume;
-        maker_data.trading_profit += trade_value - trade.maker_fee;
+        maker_data.trading_profit += trade_value - trade.maker_fee*trade_value;
     }
 }
