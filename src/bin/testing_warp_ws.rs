@@ -68,27 +68,29 @@ async fn main() {
                         Message::Text(text) => {
                             match serde_json::from_str::<EngineData>(&text) {
                                 Ok(parsed_msg) => {
-                                    if parsed_msg.topic == "best_bid_change.deribit.BTC_USDT" ||
-                                        parsed_msg.topic == "best_ask_change.deribit.BTC_USDT" {
+                                    if parsed_msg.topic == "best_price_change.deribit.BTC_USDT" {
                                         match serde_json::from_str::<BestPriceUpdate>(&parsed_msg.message) {
                                             Ok(content) => {
                                                 println!("Parsed message: {:?}", &content);
                                                 // Only place bid orders for the moment since
                                                 // we do not keep track of our open orders and then we get negative spread
-                                                // Note that the changed side is not nessecarily the only side that was changed
+                                                // Note that the changed side is not necessarily the only side that was changed
                                                 // However, it is the side that 'caused' the change
-                                                let side = &content.changed_side;
+                                                let mut side = content.changed_side.clone();
+                                                if side == "Both".to_string() {
+                                                    side = "Bid".to_string();
+                                                }
 
                                                 let order_price = match side.as_str() {
-                                                    "bid" => { f64::from_str(&content.best_bid_price).unwrap() + 30.0 },
-                                                    "ask" => { f64::from_str(&content.best_ask_price).unwrap() - 30.0 },
+                                                    "Bid" => { f64::from_str(&content.best_bid_price).unwrap() + 30.0 },
+                                                    "Ask" => { f64::from_str(&content.best_ask_price).unwrap() - 30.0 },
+                                                    "Both" => { f64::from_str(&content.best_bid_price).unwrap() + 30.0 }
                                                     _ => -1.0,
                                                 };
-
                                                 place_limit_order("BTC",
                                                                   "USDT",
                                                                   order_price,
-                                                                  side,
+                                                                  side.as_str(),
                                                                   0.002,
                                                                   "testing_trader",
                                                                   "33",

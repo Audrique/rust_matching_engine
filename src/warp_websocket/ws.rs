@@ -70,7 +70,7 @@ async fn client_msg(id: &str,
         Ok(v) => v,
         Err(_) => return
     };
-    // println!("{:?}", message);
+    println!("{:?}", message);
 
     if message == "ping" || message == "ping\n" {
         println!("Received ping from {}", id);
@@ -143,8 +143,8 @@ async fn send_message_to_client(client: &Client, msg: Message) {
 
 fn prepare_limit_order(data: Value) -> (TradingPair, Decimal, Order) {
     let bid_or_ask = match data["side"].as_str() {
-        Some("bid") => {BidOrAsk::Bid},
-        Some("ask") => {BidOrAsk::Ask},
+        Some("Bid") => {BidOrAsk::Bid},
+        Some("Ask") => {BidOrAsk::Ask},
         _ => {panic!("Unexpected value for side received from the client!");} // Handle this better potentially?
     };
     let trader_id = data["trader_id"].as_str().expect("Missing trader_id").to_string();
@@ -164,8 +164,8 @@ fn prepare_limit_order(data: Value) -> (TradingPair, Decimal, Order) {
 
 fn prepare_cancel_order(data: Value) -> (TradingPair, BidOrAsk, Decimal, String) {
     let bid_or_ask = match data["side"].as_str() {
-        Some("bid") => {BidOrAsk::Bid},
-        Some("ask") => {BidOrAsk::Ask},
+        Some("Bid") => {BidOrAsk::Bid},
+        Some("Ask") => {BidOrAsk::Ask},
         _ => {panic!("Unexpected value for side received from the client!");} // Handle this better potentially?
     };
     let trading_pair_base = data["trading_pair_base"].as_str().ok_or("Missing trading_pair_base").unwrap();
@@ -178,8 +178,8 @@ fn prepare_cancel_order(data: Value) -> (TradingPair, BidOrAsk, Decimal, String)
 
 fn prepare_market_order(data: Value) -> (TradingPair, Order) {
     let bid_or_ask = match data["side"].as_str() {
-        Some("bid") => {BidOrAsk::Bid},
-        Some("ask") => {BidOrAsk::Ask},
+        Some("Bid") => {BidOrAsk::Bid},
+        Some("Ask") => {BidOrAsk::Ask},
         _ => {panic!("Unexpected value for side received from the client!");} // Handle this better potentially?
     };
     let trader_id = data["trader_id"].as_str().expect("Missing trader_id").to_string();

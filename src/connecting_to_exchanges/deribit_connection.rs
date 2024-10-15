@@ -671,7 +671,6 @@ async fn check_and_publish_price_change(
             "best_ask_price": best_price_data.best_ask_price,
             "best_bid_price": best_price_data.best_bid_price
         }).to_string();
-        let spread = best_price_data.best_ask_price - best_price_data.best_bid_price;
 
         publish_message(message.clone(), topic, &publish_client).await?;
         drop(previous_best);
