@@ -8,7 +8,7 @@ use futures_util::stream::SplitSink;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
 use serde::Deserialize;
-use serde_json::{from_str, Value};
+use serde_json::{from_str, json, Value};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use warp::ws::{Message, WebSocket};
@@ -65,12 +65,11 @@ async fn client_msg(id: &str,
                     matching_engine: Arc<TokioMutex<MatchingEngine>>,
                     traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>
 ) {
-    // println!("received message from {}: {:?}", id, msg);
     let message = match msg.to_str() {
         Ok(v) => v,
         Err(_) => return
     };
-    println!("{:?}", message);
+    // println!("{:?}", message);
 
     if message == "ping" || message == "ping\n" {
         println!("Received ping from {}", id);
@@ -97,7 +96,8 @@ async fn client_msg(id: &str,
                 let (pair, trades) = engine.place_limit_order(trading_pair, price, order_to_place).unwrap();
                 drop(engine); // Drop the lock on the engine as soon as possible
                 update_trader_data(pair, trades.clone(), traders_data).await;
-                // TODO: publish these trades to the correct topic
+                // TODO: publish these trades to the correct topic,
+                //  Send a status response of success or not with the unwrap() of the place_limit_order function above
                 // println!("The trades that occurred after placing an order from the client trader: {:?}", trades);
             },
             "cancel_limit_order" => {
@@ -114,7 +114,55 @@ async fn client_msg(id: &str,
                 // TODO: publish these trades to the correct topic
                 println!("The trades that occurred after placing an order from the client trader: {:?}", trades);
             },
-            _ => {panic!("Client request was not a placement or cancellation of a limit order, nor a market order.")}
+            "open_orders_and_positions" => {
+                //TODO: probably dont use this and publish all the user trades with trades.trade_id.instrument.exchange or something (look at the
+                // convention that I used for the other topics
+                let engine = matching_engine.lock().await;
+                if let (Some(Value::String(trader_id)),
+                    Some(Value::String(trading_pair_base)),
+                    Some(Value::String(trading_pair_quote)))
+                    = (data.get("trader_id"),
+                       data.get("trading_pair_base"),
+                       data.get("trading_pair_quote"))
+                {
+                    let open_orders = engine.open_orders(trader_id.clone());
+                    drop(engine);
+
+                    let trading_pair = TradingPair::new(trading_pair_base.clone(), trading_pair_quote.clone());
+                    let requested_open_orders = open_orders.get(&trading_pair);
+
+                    let open_orders = match requested_open_orders {
+                        Some(orders) if !orders.is_empty() => orders,
+                        _ => &HashMap::new(), // Use an empty HashMap if there are no open orders
+                    };
+
+                    let td = traders_data.lock().await;
+                    let trader_data = td.get(trader_id);
+
+
+                    let position = trader_data
+                        .and_then(|td| td.positions.get(&trading_pair.to_string()))
+                        .cloned()
+                        .unwrap_or(0.0);
+                    drop(td);
+                    let msg = Message::text(json!({
+                        "open_orders": open_orders,
+                        "position": position,
+                    }).to_string());
+                    let locked_clients = clients.write().await;
+                    if let Some(client) = locked_clients.get(id) {
+                        if let Err(e) = client.sender.as_ref().unwrap().send(Ok(msg)) {
+                            eprintln!("open_orders_and_positions {}: {}", id, e);
+                        }
+                    }
+                    return;
+
+                } else {
+                    println!("open_orders_and_positions request was not properly formatted!");
+                };
+
+            },
+            _ => {panic!("Client request was not a placemen, cancellation, market order or client data request.")}
         }
         return;
     }

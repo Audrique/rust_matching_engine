@@ -48,4 +48,19 @@ pub async fn place_limit_order(trading_pair_base: &str,
     println!("Sent the order request to the engine.");
 }
 
+pub async fn request_open_orders_and_position(trading_pair_base: &str,
+                               trading_pair_quote: &str,
+                               trader_id: &str,
+                               ws_stream_ref: &mut WebSocketStream<MaybeTlsStream<TcpStream>>
+) {
+    let request_open_orders_and_position_msg = json!({"action": "open_orders_and_positions",
+            "trading_pair_base": trading_pair_base,
+            "trading_pair_quote": trading_pair_quote,
+            "trader_id": trader_id
+    });
+    ws_stream_ref.send(Message::text(request_open_orders_and_position_msg.to_string())).await.unwrap();
+    println!("Sent the order request to the engine.");
+}
+
+
 
