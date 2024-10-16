@@ -19,7 +19,7 @@ pub enum BuyOrSell {
     Sell,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub enum BidOrAsk {
     Bid,
     Ask,
@@ -401,7 +401,7 @@ impl Limit {
         self.orders.iter().any(|order| order.order_id == "-1")
     }
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Order {
     pub size: f64,
     bid_or_ask: BidOrAsk,
