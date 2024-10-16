@@ -97,8 +97,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ws_stream.send(Message::text("ping")).await.unwrap();
         println!("Message send to the server");
 
-        let price_update_table_name = "MICRO_SEC_DB.DERIBIT_BTC_USDT_AND_DERIBIT_BTC_PERPETUAL_BEST_PRICES3";
-        let trade_update_table_name = "MICRO_SEC_DB.DERIBIT_BTC_USDT_AND_DERIBIT_BTC_PERPETUAL_TRADES3";
+        let price_update_table_name = "MICRO_SEC_DB.run_0";
+        let trade_update_table_name = "MICRO_SEC_DB.trades_run_0";
         let taos = build_taos_ws().await.unwrap();
 
         // Receive messages from the WebSocket server

@@ -12,6 +12,10 @@ name = "testing_warp_ws"
 path = "src/bin/testing_warp_ws.rs"
 
 [[bin]]
+name = "GLFT_mm"
+path = "src/bin/GLFT_mm.rs"
+
+[[bin]]
 name = "main"
 path = "src/main.rs"
 
