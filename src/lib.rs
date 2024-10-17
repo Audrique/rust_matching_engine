@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use futures_util::SinkExt;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::net::TcpStream;
@@ -24,6 +26,17 @@ pub struct BestPriceUpdate {
     pub best_bid_price: String,
     pub best_ask_price: String,
     pub changed_side: String,
+}
+#[derive(Debug)]
+struct LocalOrder {
+    asks: HashMap<Decimal, f64>, // price --> volume
+    bids: HashMap<Decimal, f64>,
+}
+
+#[derive(Debug)]
+struct ClientData {
+    open_orders: HashMap<String, LocalOrder>, // TradingPair --> open orders
+    positions: HashMap<String, f64>, // TradingPair --> position
 }
 
 pub async fn place_limit_order(trading_pair_base: &str,
