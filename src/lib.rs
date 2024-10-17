@@ -28,14 +28,14 @@ pub struct BestPriceUpdate {
     pub changed_side: String,
 }
 #[derive(Debug)]
-struct LocalOrder {
+struct OpenOrders {
     asks: HashMap<Decimal, f64>, // price --> volume
     bids: HashMap<Decimal, f64>,
 }
 
 #[derive(Debug)]
 struct ClientData {
-    open_orders: HashMap<String, LocalOrder>, // TradingPair --> open orders
+    open_orders: HashMap<String, OpenOrders>, // TradingPair --> open orders
     positions: HashMap<String, f64>, // TradingPair --> position
 }
 
