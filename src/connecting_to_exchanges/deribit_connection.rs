@@ -22,6 +22,7 @@ use crate::connecting_to_exchanges::for_all_exchanges::{TraderData, update_trade
 use crate::connecting_to_exchanges::parse_book_message::{BookUpdate, OrderBookEntry};
 use rust_decimal_macros::dec;
 use serde::Serialize;
+use taos::Itertools;
 // TODO: refactor error handling (make it with '?' and Box< dyn std::error:Error>)
 
 #[derive(Debug, Clone, Serialize)]
@@ -209,6 +210,7 @@ fn initialize_on_hold_changes(trading_pairs: Vec<TradingPair>,
 //         top_10_asks_bids_periodically.{deribit}.{pair}, sends the top 10 bids and asks every 250ms (prices and volume)
 //         trades.{deribit}.{pair}, sends trades that happen for the given exchange and trading_pair
 //         traders_data_periodically, sends all connected traders positions and trading_profit every 250ms
+//         trades.{trader_id}, sends trades which involve a specific trader_id when they happen
 pub async fn on_incoming_deribit_message(
     ws_stream_ref: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
     matching_engine: Arc<TokioMutex<MatchingEngine>>,
@@ -390,8 +392,9 @@ async fn place_orders(parsed_data: BookUpdate,
                 matching_engine: &mut MatchingEngine,
                 on_hold_changes: &mut HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, (f64, Instant)>>>,
                 time_until_forget_on_hold: Duration,
-                traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>
-) {
+                traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>,
+                publish_client: &Arc<Client>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let trading_pair = parsed_data.trading_pair.clone();
 
     // Process asks
@@ -403,7 +406,8 @@ async fn place_orders(parsed_data: BookUpdate,
             matching_engine,
             on_hold_changes,
             traders_data.clone(),
-        ).await;
+            publish_client
+        ).await?;
     }
 
     // Process bids
@@ -415,7 +419,8 @@ async fn place_orders(parsed_data: BookUpdate,
             matching_engine,
             on_hold_changes,
             traders_data.clone(),
-        ).await;
+            &publish_client
+        ).await?;
     }
 
     // Clean up on_hold_change
@@ -425,7 +430,7 @@ async fn place_orders(parsed_data: BookUpdate,
             price_map.retain(|_, (_, timestamp)| cleanup_time.duration_since(*timestamp) <= time_until_forget_on_hold);
         }
     }
-    // println!("on hold: {:?}", on_hold_changes);
+    Ok(())
 }
 
 async fn process_order_entry(
@@ -434,27 +439,25 @@ async fn process_order_entry(
     trading_pair: &TradingPair,
     matching_engine: &mut MatchingEngine,
     on_hold_changes: &mut HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, (f64, Instant)>>>,
-    traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>
-) {
+    traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>,
+    publish_client_ref: &Arc<Client>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let price = Decimal::from_f64(entry.price).unwrap();
     let volume = entry.volume;
 
-    let check_exchange_order_in_orderbook = match bid_or_ask {
-        BidOrAsk::Ask => matching_engine
-            .orderbooks
-            .get(trading_pair)
-            .unwrap()
-            .asks
-            .get(&price)
-            .map_or(false, |limit| limit.check_exchange_order_in_limit()),
-        BidOrAsk::Bid => matching_engine
-            .orderbooks
-            .get(trading_pair)
-            .unwrap()
-            .bids
-            .get(&price)
-            .map_or(false, |limit| limit.check_exchange_order_in_limit()),
-    };
+    let check_exchange_order_in_orderbook = matching_engine
+        .orderbooks
+        .get(trading_pair)
+        .unwrap()
+        .get_side(&bid_or_ask)
+        .get(&price)
+        .map_or(false, |limit| limit.check_exchange_order_in_limit());
+
+    let on_hold_entry = on_hold_changes
+        .get_mut(trading_pair)
+        .unwrap()
+        .get_mut(&bid_or_ask)
+        .unwrap();
 
     match entry.action.as_str() {
         "delete" => {
@@ -464,15 +467,10 @@ async fn process_order_entry(
                     bid_or_ask.clone(),
                     price,
                     volume // In this case the volume is always 0.0 -> maybe change it? or keep it as an extra 'check'
-                ).unwrap();
+                )?;
             } else {
-                on_hold_changes
-                    .get_mut(trading_pair)
-                    .unwrap()
-                    .get_mut(&bid_or_ask)
-                    .unwrap()
-                    .insert(price, (volume, Instant::now()));
-            }
+                on_hold_entry.insert(price, (volume, Instant::now()));
+            };
         },
         "new" => {
             let (pair, trades) = matching_engine.place_limit_order(
@@ -484,32 +482,21 @@ async fn process_order_entry(
                     "deribit-exchange".to_string(),
                     "-1".to_string()
                 )
-            ).unwrap();
-            update_trader_data(pair, trades, traders_data.clone()).await;
+            )?;
+            update_trader_data(pair, trades.clone(), traders_data.clone()).await;
+            publish_trades_for_trader_id(trades, publish_client_ref).await?;
 
-            let volume_on_hold = on_hold_changes
-                .get_mut(trading_pair)
-                .unwrap()
-                .get_mut(&bid_or_ask)
-                .unwrap()
-                .get(&price)
-                .map(|&(vol, _)| vol)
-                .unwrap_or(-999.0);
-
-            if volume_on_hold >= 0.0 {
-                matching_engine.leave_volume_from_exchange(
-                    trading_pair.clone(),
-                    bid_or_ask.clone(),
-                    price,
-                    volume_on_hold
-                ).unwrap();
-                on_hold_changes
-                    .get_mut(trading_pair)
-                    .unwrap()
-                    .get_mut(&bid_or_ask)
-                    .unwrap()
-                    .remove(&price);
-            }
+            if let Some(&(volume_on_hold, _)) = on_hold_entry.get(&price) {
+                if volume_on_hold >= 0.0 {
+                    matching_engine.leave_volume_from_exchange(
+                        trading_pair.clone(),
+                        bid_or_ask.clone(),
+                        price,
+                        volume_on_hold
+                    )?;
+                    on_hold_entry.remove(&price);
+                };
+            };
         },
         "change" => {
             if check_exchange_order_in_orderbook {
@@ -518,17 +505,42 @@ async fn process_order_entry(
                     bid_or_ask.clone(),
                     price,
                     volume
-                ).unwrap();
-            }
-            on_hold_changes
-                .get_mut(trading_pair)
-                .unwrap()
-                .get_mut(&bid_or_ask)
-                .unwrap()
-                .insert(price, (volume, Instant::now()));
+                )?;
+            };
+            on_hold_entry.insert(price, (volume, Instant::now()));
         },
-        _ => eprintln!("Update-type not one of 'change', 'new' or 'delete'!")
+        _ => return Err("Update-type not one of 'change', 'new' or 'delete'!".into())
     }
+    Ok(())
+}
+
+async fn publish_trades_for_trader_id(trades: Vec<Trade>,
+                                      publish_client_ref: &Arc<Client>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let mut grouped_trades: HashMap<String, Vec<Trade>> = HashMap::new();
+    for trade in trades {
+        if !trade.trader_id_maker.ends_with("exchange") {
+            grouped_trades
+                .entry(trade.trader_id_maker.clone())
+                .or_insert_with(Vec::new)
+                .push(trade.clone());
+        }
+        if !trade.trader_id_taker.ends_with("exchange") {
+            grouped_trades
+                .entry(trade.trader_id_taker.clone())
+                .or_insert_with(Vec::new)
+                .push(trade.clone());
+        }
+    }
+
+    for (trader_id, trades) in grouped_trades {
+        let msg = json!({
+            "trades": trades,
+        }).to_string();
+        let topic = format!("trades.{}", trader_id);
+        publish_message(msg, topic, publish_client_ref).await?;
+    }
+    Ok(())
 }
 
 async fn publish_message(msg: String, topic: String, client: &Client) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -582,7 +594,8 @@ async fn process_order_updates(
         parsed_data,
         matching_engine,
         on_hold_changes,
-        traders_data
+        traders_data,
+        &publish_client,
     ).await?;
 
     check_and_publish_price_change(
@@ -597,31 +610,25 @@ async fn process_order_updates(
     Ok(())
 }
 
-// TODO: check more about the 'No orders found'. Since I added the trade subscription I get this message in the beginning.
-//  Check if the orderbook is still correct with the deribit orderbooks
 async fn update_orders_and_get_best_price(
     parsed_data: BookUpdate,
     matching_engine: Arc<TokioMutex<MatchingEngine>>,
     on_hold_changes: Arc<TokioMutex<HashMap<TradingPair, HashMap<BidOrAsk, HashMap<Decimal, (f64, Instant)>>>>>,
     traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>,
+    publish_client: &Arc<Client>,
 ) -> Result<(Decimal, Decimal), Box<dyn Error + Send + Sync>> {
     let mut engine = matching_engine.lock().await;
     let mut on_hold_changes_ = on_hold_changes.lock().await;
-    // if parsed_data.update_type == "snapshot".to_string() {
-    //     println!("SNAPSHOT!!");
-    // }
     place_orders(parsed_data.clone(),
                  &mut engine,
                  &mut on_hold_changes_,
                  Duration::from_millis(200), // TODO: Play with this value to make sure we keep the correct orderbook and look if we publish wrong things
-                 traders_data).await;
+                 traders_data,
+                 publish_client
+    ).await?;
     let orderbook = engine.orderbooks.get(&parsed_data.trading_pair).ok_or("Orderbook not found")?;
     let (best_ask_price, _) = orderbook.asks.first_key_value().ok_or("No orders found for asks")?;
     let (best_bid_price, _) = orderbook.bids.last_key_value().ok_or("No orders found for bids")?;
-    // let spread = best_ask_price - best_bid_price;
-    // if spread <= dec!(0.0) {
-    //     println!("The spread is negative: {:?}", spread);
-    // }
     Ok((best_ask_price.clone(), best_bid_price.clone()))
 }
 
