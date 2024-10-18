@@ -260,6 +260,13 @@ impl Orderbook {
             })
             .collect()
     }
+
+    pub fn get_side(&self, bid_or_ask: &BidOrAsk) -> &BTreeMap<Decimal, Limit> {
+        match bid_or_ask {
+            BidOrAsk::Bid => &self.bids,
+            BidOrAsk::Ask => &self.asks,
+        }
+    }
 }
 
 
