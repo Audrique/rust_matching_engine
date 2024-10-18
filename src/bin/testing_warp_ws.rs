@@ -38,18 +38,18 @@ async fn main() {
     if response.status().is_success() {
         let register_response: RegisterResponse = response.json().await.expect("Failed to parse response");
         println!("Successfully registered client! WebSocket URL: {}", register_response.url);
-        // // add the topic of the best ask
-        // let add_topic_url = "http://127.0.0.1:8000/add_topic";
-        // let topic_ask = format!("best_ask_change.{}.{}", exchange.clone(), pair_string.clone());
-        // let client_id = register_response.url.split('/').last().unwrap_or("");
-        // let add_topic_request = json!({"topic": topic_ask, "client_id": client_id});
-        // let add_topic_response = http_client.post(add_topic_url)
-        //     .json(&add_topic_request)  // Send as JSON
-        //     .send()
-        //     .await
-        //     .expect("Failed to send request");
-        // let add_topic_response2: String  = add_topic_response.text().await.expect("Failed to parse response");
-        // println!("Successfully added a topic for the client: {}", add_topic_response2);
+        // add the topic of the best ask
+        let add_topic_url = "http://127.0.0.1:8000/add_topic";
+        let topic_trades = "trades.testing_trader";
+        let client_id = register_response.url.split('/').last().unwrap_or("");
+        let add_topic_request = json!({"topic": topic_trades, "client_id": client_id});
+        let add_topic_response = http_client.post(add_topic_url)
+            .json(&add_topic_request)  // Send as JSON
+            .send()
+            .await
+            .expect("Failed to send request");
+        let add_topic_response2: String  = add_topic_response.text().await.expect("Failed to parse response");
+        println!("Successfully added a topic for the client: {}", add_topic_response2);
 
         // Now we have a URL which we are registered with under register_response.url and can now get a websocket_connection
         let (mut ws_stream, _) = connect_async(register_response.url).await.expect("Failed to connect");
@@ -71,7 +71,6 @@ async fn main() {
                                     if parsed_msg.topic == "best_price_change.deribit.BTC_USDT" {
                                         match serde_json::from_str::<BestPriceUpdate>(&parsed_msg.message) {
                                             Ok(content) => {
-                                                println!("Parsed message: {:?}", &content);
                                                 // Only place bid orders for the moment since
                                                 // we do not keep track of our open orders and then we get negative spread
                                                 // Note that the changed side is not necessarily the only side that was changed
@@ -99,6 +98,9 @@ async fn main() {
                                             },
                                             Err(e) => println!("Failed to parse message content: {:?}", e),
                                         }
+                                    }
+                                    if parsed_msg.topic == "trades.testing_trader" {
+                                        println!("Received trade update: {:?}", parsed_msg);
                                     }
                                 },
                                 Err(e) => println!("Failed to parse message: {:?}", e),
