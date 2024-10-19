@@ -35,16 +35,35 @@ pub struct BestPriceUpdate {
     pub changed_side: String,
 }
 
+#[derive(Debug)]
+pub struct Order {
+    pub volume: f64,
+    pub order_id: String,
+}
+ impl Order {
+     pub fn new(volume: f64, order_id: String) -> Order {
+         Order {
+             volume,
+             order_id
+         }
+     }
+ }
 
+// TODO from all this make a 'local_engine' that encompasses ClientData and a struct that can place orders etc
+//  so it should have the place_limit_order, ... and with this we can take the StringCounter from engine.rs and
+//  make the order_id's an internal thing.
+
+//TODO: also make a file to unit test these things.
 #[derive(Debug)]
 pub struct OpenOrders {
-    pub asks: HashMap<Decimal, f64>,
-    pub bids: HashMap<Decimal, f64>,
+    pub asks: HashMap<Decimal, Vec<Order>>,
+    pub bids: HashMap<Decimal, Vec<Order>>,
     pub open_ask_volume: f64,
     pub open_bid_volume: f64,
 }
+
 impl OpenOrders {
-    pub fn new(asks: HashMap<Decimal, f64>, bids: HashMap<Decimal, f64>, open_ask_volume: f64, open_bid_volume: f64) -> OpenOrders {
+    pub fn new(asks: HashMap<Decimal, Vec<Order>>, bids: HashMap<Decimal, Vec<Order>>, open_ask_volume: f64, open_bid_volume: f64) -> OpenOrders {
         OpenOrders {
             asks,
             bids,
@@ -53,51 +72,67 @@ impl OpenOrders {
         }
     }
 
-    pub fn add_order(&mut self, side: BidOrAsk, price: Decimal, volume: f64) {
+    pub fn add_order(&mut self, side: BidOrAsk, price: Decimal, volume: f64, order_id: String) {
+        let order = Order::new(volume, order_id);
         match side {
             BidOrAsk::Ask => {
-                *self.asks.entry(price).or_insert(0.0) += volume;
+                self.asks.entry(price).or_insert_with(Vec::new).push(order);
                 self.open_ask_volume += volume;
             }
             BidOrAsk::Bid => {
-                *self.bids.entry(price).or_insert(0.0) += volume;
+                self.bids.entry(price).or_insert_with(Vec::new).push(order);
                 self.open_bid_volume += volume;
             }
         }
     }
 
-    pub fn remove_order(&mut self, side: BidOrAsk, price: Decimal, volume: f64) -> Result<(), String> {
+    pub fn remove_order(&mut self, side: BidOrAsk, price: Decimal, order_id: String) -> Result<(), String> {
         match side {
             BidOrAsk::Ask => {
-                if let Some(existing_volume) = self.asks.get_mut(&price) {
-                    *existing_volume -= volume;
-                    self.open_ask_volume -= volume;
-                    if *existing_volume <= 1e-8 {
-                        self.asks.remove(&price);
+                if let Some(orders) = self.asks.get_mut(&price) {
+                    if let Some(index) = orders.iter().position(|o| o.order_id == order_id) {
+                        let removed_order = orders.remove(index);
+                        self.open_ask_volume -= removed_order.volume;
+                        if orders.is_empty() {
+                            self.asks.remove(&price);
+                        }
+                        Ok(())
+                    } else {
+                        Err(format!("No ask order found with id {} at price {}", order_id, price))
                     }
-                    Ok(())
                 } else {
-                    Err(format!("No ask order found at price {}", price))
+                    Err(format!("No ask orders found at price {}", price))
                 }
             }
             BidOrAsk::Bid => {
-                if let Some(existing_volume) = self.bids.get_mut(&price) {
-                    *existing_volume -= volume;
-                    self.open_bid_volume -= volume;
-                    if *existing_volume <= 1e-8 {
-                        self.bids.remove(&price);
+                if let Some(orders) = self.bids.get_mut(&price) {
+                    if let Some(index) = orders.iter().position(|o| o.order_id == order_id) {
+                        let removed_order = orders.remove(index);
+                        self.open_bid_volume -= removed_order.volume;
+                        if orders.is_empty() {
+                            self.bids.remove(&price);
+                        }
+                        Ok(())
+                    } else {
+                        Err(format!("No bid order found with id {} at price {}", order_id, price))
                     }
-                    Ok(())
                 } else {
-                    Err(format!("No bid order found at price {}", price))
+                    Err(format!("No bid orders found at price {}", price))
                 }
             }
         }
     }
 
-    pub fn amend_order(&mut self, side: BidOrAsk, old_price: Decimal, new_price: Decimal, old_volume: f64, new_volume: f64) -> Result<(), String> {
-        self.remove_order(side.clone(), old_price, old_volume)?;
-        self.add_order(side, new_price, new_volume);
+    pub fn amend_order(&mut self,
+                       side: BidOrAsk,
+                       old_price: Decimal,
+                       new_price: Decimal,
+                       old_order_id: String,
+                       new_volume: f64,
+                       new_order_id: String
+    ) -> Result<(), String> {
+        self.remove_order(side.clone(), old_price, old_order_id)?;
+        self.add_order(side, new_price, new_volume, new_order_id);
         Ok(())
     }
 }
@@ -117,23 +152,31 @@ impl ClientData {
         }
     }
 
-    pub fn add_order(&mut self, trading_pair: &str, side: BidOrAsk, price: Decimal, volume: f64) {
+    pub fn add_order(&mut self, trading_pair: &str, side: BidOrAsk, price: Decimal, volume: f64, order_id: String) {
         let orders = self.open_orders.entry(trading_pair.to_string())
             .or_insert_with(|| OpenOrders::new(HashMap::new(), HashMap::new(), 0.0, 0.0));
-        orders.add_order(side, price, volume);
+        orders.add_order(side, price, volume, order_id);
     }
 
-    pub fn remove_order(&mut self, trading_pair: &str, side: BidOrAsk, price: Decimal, volume: f64) -> Result<(), String> {
+    pub fn remove_order(&mut self, trading_pair: &str, side: BidOrAsk, price: Decimal, order_id: String) -> Result<(), String> {
         if let Some(orders) = self.open_orders.get_mut(trading_pair) {
-            orders.remove_order(side, price, volume)
+            orders.remove_order(side, price, order_id)
         } else {
             Err(format!("No open orders found for trading pair: {}", trading_pair))
         }
     }
 
-    pub fn amend_order(&mut self, trading_pair: &str, side: BidOrAsk, old_price: Decimal, new_price: Decimal, old_volume: f64, new_volume: f64) -> Result<(), String> {
+    pub fn amend_order(&mut self,
+                       trading_pair: &str,
+                       side: BidOrAsk,
+                       old_price: Decimal,
+                       new_price: Decimal,
+                       new_volume: f64,
+                       old_order_id: String,
+                       new_order_id: String,
+    ) -> Result<(), String> {
         if let Some(orders) = self.open_orders.get_mut(trading_pair) {
-            orders.amend_order(side, old_price, new_price, old_volume, new_volume)
+            orders.amend_order(side, old_price, new_price, old_order_id, new_volume, new_order_id)
         } else {
             Err(format!("No open orders found for trading pair: {}", trading_pair))
         }
