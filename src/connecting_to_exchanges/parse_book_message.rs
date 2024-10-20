@@ -73,7 +73,7 @@ mod tests {
             "asks": [["delete", 62944.0, 0.0], ["new", 62949.0, 16500.0]],
             "bids": [["change", 62933.0, 7550.0]],
             "change_id": 78693046768,
-            "instrument_name": "BTC_USDT"
+            "instrument_name": "BTC_USDT",
             "timestamp": 1728299690099,
             "type": "change"
         }"#;
@@ -118,7 +118,7 @@ mod tests {
             "asks": [],
             "bids": [],
             "change_id": 78693046768,
-            "instrument_name": "ETH-PERPETUAL"
+            "instrument_name": "ETH-PERPETUAL",
             "timestamp": 1728299690099,
             "type": "change"
         }"#;
@@ -137,7 +137,7 @@ mod tests {
             "asks": [],
             "bids": [],
             "change_id": 78693046768,
-            "instrument_name": "INVALID"
+            "instrument_name": "INVALID",
             "timestamp": 1728299690099,
             "type": "change"
         }"#;
@@ -154,7 +154,7 @@ mod tests {
             "asks": [["delete", "not_a_number", 0.0]],
             "bids": [],
             "change_id": 78693046768,
-            "instrument_name": "BTC-PERPETUAL"
+            "instrument_name": "BTC-PERPETUAL",
             "timestamp": 1728299690099,
             "type": "change"
         }"#;
