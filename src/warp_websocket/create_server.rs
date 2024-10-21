@@ -7,14 +7,14 @@ use crate::warp_websocket::{handler, handler::TopicActionRequest};
 use crate::{Clients};
 use crate::matching_engine::engine::MatchingEngine;
 use crate::connecting_to_exchanges::for_all_exchanges::TraderData;
-
 fn with_clients(clients: Clients) -> impl Filter<Extract = (Clients,), Error = Infallible> + Clone {
     warp::any().map(move || clients.clone())
 }
 
 pub async fn start_server(tx: oneshot::Sender<()>,
                           matching_engine: Arc<TokioMutex<MatchingEngine>>,
-                          traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>) {
+                          traders_data: Arc<TokioMutex<HashMap<String, TraderData>>>,
+) {
     let clients: Clients = Arc::new(RwLock::new(HashMap::new()));
     let topic_counters: Arc<RwLock<HashMap<String, u32>>> = Arc::new(RwLock::new(HashMap::new()));
 
