@@ -484,7 +484,7 @@ async fn process_order_entry(
                 )
             )?;
             update_trader_data(pair, trades.clone(), traders_data.clone()).await;
-            publish_trades_for_trader_id(trades, publish_client_ref).await?;
+            publish_trades_for_trader_id(trades, publish_client_ref, trading_pair.clone().to_string()).await?;
 
             if let Some(&(volume_on_hold, _)) = on_hold_entry.get(&price) {
                 if volume_on_hold >= 0.0 {
@@ -516,6 +516,7 @@ async fn process_order_entry(
 
 async fn publish_trades_for_trader_id(trades: Vec<Trade>,
                                       publish_client_ref: &Arc<Client>,
+                                      trading_pair: String,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut grouped_trades: HashMap<String, Vec<Trade>> = HashMap::new();
     for trade in trades {
@@ -535,10 +536,11 @@ async fn publish_trades_for_trader_id(trades: Vec<Trade>,
 
     for (trader_id, trades) in grouped_trades {
         let msg = json!({
+            "trading_pair": trading_pair.clone(),
             "trades": trades,
         }).to_string();
         let topic = format!("trades.{}", trader_id);
-        publish_message(msg, topic, publish_client_ref).await?;
+        publish_message(msg.clone(), topic, publish_client_ref).await?;
     }
     Ok(())
 }
