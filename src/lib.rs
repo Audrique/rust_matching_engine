@@ -35,6 +35,30 @@ pub struct BestPriceUpdate {
     pub changed_side: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub enum BuyOrSell {
+    Buy,
+    Sell,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Trade {
+    pub trader_id_taker: String,
+    pub trader_id_maker: String,
+    pub volume: f64,
+    pub price: Decimal,
+    pub timestamp: u64,
+    pub taker_fee: f64,
+    pub maker_fee: f64,
+    pub direction: BuyOrSell,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TradesUpdate {
+    pub trades: Vec<Trade>,
+    pub trading_pair: String,
+}
+
 #[derive(Debug)]
 pub struct Order {
     pub volume: f64,
@@ -181,6 +205,12 @@ impl ClientData {
             Err(format!("No open orders found for trading pair: {}", trading_pair))
         }
     }
+
+    // pub fn process_trades(&self, trades_update: TradesUpdate) {
+    //     for trade in trades_update.trades {
+    //         trade.
+    //     }
+    // }
 
     pub fn get_open_orders(&self, trading_pair: &str) -> Option<&OpenOrders> {
         self.open_orders.get(trading_pair)
